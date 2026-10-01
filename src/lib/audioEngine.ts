@@ -99,7 +99,8 @@ export function playNoteByName(noteName: string): void {
   }
 }
 
-export function playChord(noteNames: string[], arpeggiate: boolean = false): void {
+export function playChord(noteNames: string[] | null, arpeggiate: boolean = false): void {
+  if(!noteNames) return;
   try {
     const ctx = getCtx();
     const now = ctx.currentTime;

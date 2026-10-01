@@ -1,8 +1,9 @@
 import type { Collection, Loadout } from '@/types';
 import { getStarterCollection } from '@/data/cards';
 
-const COLLECTION_KEY = 'spirit-chord:collection';
-const LOADOUT_KEY = 'spirit-chord:loadout';
+// v2: card set replaced by the Chord Casters rules (docs/rules.md); older saves reference removed cards
+const COLLECTION_KEY = 'spirit-chord:collection:v2';
+const LOADOUT_KEY = 'spirit-chord:loadout:v2';
 
 // ─── Collection ───────────────────────────────────────────────────────────────
 export function loadCollection(): Collection {
@@ -25,7 +26,7 @@ function defaultCollection(): Collection {
   return {
     cardCounts: getStarterCollection(),
     unlockedMusicians: ['musician-sunslinger', 'musician-resonant'],
-    unlockedInstruments: ['instrument-southern-belle', 'instrument-minor-mandate'],
+    unlockedInstruments: ['instrument-southern-belle', 'instrument-minor-mandate', 'instrument-excalibur'],
   };
 }
 

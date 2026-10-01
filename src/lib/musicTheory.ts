@@ -1,22 +1,22 @@
-import type { NoteId, NoteSpiritDef } from '@/types';
+import type { NoteDef, NoteId } from '@/types';
 
 // ─── Note definitions ────────────────────────────────────────────────────────
-export const NOTE_SPIRITS: NoteSpiritDef[] = [
-  { id: 'Cs', displayName: 'C#/Db',  primaryNote: 'C#', altNote: 'Db', semitone: 1,  frequency: 277.18, color: '#e67e22', strength: 1, will: 1 },
-  { id: 'C',  displayName: 'C',      primaryNote: 'C',  altNote: 'B#', semitone: 0,  frequency: 261.63, color: '#e74c3c', strength: 1, will: 1 },
-  { id: 'D',  displayName: 'D',      primaryNote: 'D',  altNote: 'D',  semitone: 2,  frequency: 293.66, color: '#f1c40f', strength: 1, will: 1 },
-  { id: 'Ds', displayName: 'D#/Eb',  primaryNote: 'D#', altNote: 'Eb', semitone: 3,  frequency: 311.13, color: '#2ecc71', strength: 1, will: 1 },
-  { id: 'E',  displayName: 'E',      primaryNote: 'E',  altNote: 'Fb', semitone: 4,  frequency: 329.63, color: '#1abc9c', strength: 1, will: 1 },
-  { id: 'F',  displayName: 'F',      primaryNote: 'F',  altNote: 'E#', semitone: 5,  frequency: 349.23, color: '#3498db', strength: 1, will: 1 },
-  { id: 'Fs', displayName: 'F#/Gb',  primaryNote: 'F#', altNote: 'Gb', semitone: 6,  frequency: 369.99, color: '#9b59b6', strength: 1, will: 1 },
-  { id: 'G',  displayName: 'G',      primaryNote: 'G',  altNote: 'G',  semitone: 7,  frequency: 392.00, color: '#e91e63', strength: 1, will: 1 },
-  { id: 'Gs', displayName: 'G#/Ab',  primaryNote: 'G#', altNote: 'Ab', semitone: 8,  frequency: 415.30, color: '#ff5722', strength: 1, will: 1 },
-  { id: 'A',  displayName: 'A',      primaryNote: 'A',  altNote: 'A',  semitone: 9,  frequency: 440.00, color: '#00bcd4', strength: 1, will: 1 },
-  { id: 'As', displayName: 'A#/Bb',  primaryNote: 'A#', altNote: 'Bb', semitone: 10, frequency: 466.16, color: '#8bc34a', strength: 1, will: 1 },
-  { id: 'B',  displayName: 'B',      primaryNote: 'B',  altNote: 'Cb', semitone: 11, frequency: 493.88, color: '#ff9800', strength: 1, will: 1 },
+export const NOTES: NoteDef[] = [
+  { id: 'C',   name: 'C',     primaryNote: 'C',  altNote: 'B#', semitone: 0,  frequency: 261.63, color: '#e74c3c', artGradient: 'linear-gradient(135deg, #e74c3c, #c0392b)' },
+  { id: 'Cs',  name: 'C#/Db', primaryNote: 'C#', altNote: 'Db', semitone: 1,  frequency: 277.18, color: '#e67e22', artGradient: 'linear-gradient(135deg, #e67e22, #d35400)' },
+  { id: 'D',   name: 'D',     primaryNote: 'D',  altNote: 'D',  semitone: 2,  frequency: 293.66, color: '#f1c40f', artGradient: 'linear-gradient(135deg, #f1c40f, #f39c12)' },
+  { id: 'Ds',  name: 'D#/Eb', primaryNote: 'D#', altNote: 'Eb', semitone: 3,  frequency: 311.13, color: '#2ecc71', artGradient: 'linear-gradient(135deg, #2ecc71, #27ae60)' },
+  { id: 'E',   name: 'E',     primaryNote: 'E',  altNote: 'Fb', semitone: 4,  frequency: 329.63, color: '#1abc9c', artGradient: 'linear-gradient(135deg, #1abc9c, #16a085)' },
+  { id: 'F',   name: 'F',     primaryNote: 'F',  altNote: 'E#', semitone: 5,  frequency: 349.23, color: '#3498db', artGradient: 'linear-gradient(135deg, #3498db, #2980b9)' },
+  { id: 'Fs',  name: 'F#/Gb', primaryNote: 'F#', altNote: 'Gb', semitone: 6,  frequency: 369.99, color: '#9b59b6', artGradient: 'linear-gradient(135deg, #9b59b6, #8e44ad)' },
+  { id: 'G',   name: 'G',     primaryNote: 'G',  altNote: 'G',  semitone: 7,  frequency: 392.00, color: '#e91e63', artGradient: 'linear-gradient(135deg, #e91e63, #c0392b)' },
+  { id: 'Gs',  name: 'G#/Ab', primaryNote: 'G#', altNote: 'Ab', semitone: 8,  frequency: 415.30, color: '#ff5722', artGradient: 'linear-gradient(135deg, #ff5722, #e64a19)' },
+  { id: 'A',   name: 'A',     primaryNote: 'A',  altNote: 'A',  semitone: 9,  frequency: 440.00, color: '#00bcd4', artGradient: 'linear-gradient(135deg, #00bcd4, #00838f)' },
+  { id: 'As',  name: 'A#/Bb', primaryNote: 'A#', altNote: 'Bb', semitone: 10, frequency: 466.16, color: '#8bc34a', artGradient: 'linear-gradient(135deg, #8bc34a, #689f38)' },
+  { id: 'B',   name: 'B',     primaryNote: 'B',  altNote: 'Cb', semitone: 11, frequency: 493.88, color: '#ff9800', artGradient: 'linear-gradient(135deg, #ff9800, #f57c00)' },
 ];
 
-export const NOTE_MAP = Object.fromEntries(NOTE_SPIRITS.map(n => [n.id, n])) as Record<NoteId, NoteSpiritDef>;
+export const NOTE_MAP = Object.fromEntries(NOTES.map(n => [n.id, n])) as Record<NoteId, NoteDef>;
 
 // ─── Semitone lookup ─────────────────────────────────────────────────────────
 const NOTE_TO_SEMITONE: Record<string, number> = {
@@ -81,7 +81,7 @@ export function identifyChord(notes: string[]): ChordResult | null {
     for (const [quality, pattern] of Object.entries(CHORD_PATTERNS)) {
       if (arraysMatch(intervals, pattern)) {
         // Find root note name
-        const rootEntry = NOTE_SPIRITS.find(n => n.semitone === rootSemitone);
+        const rootEntry = NOTES.find(n => n.semitone === rootSemitone);
         const root = rootEntry?.primaryNote ?? '?';
         return { root, quality, fullName: `${root} ${quality}`, semitones };
       }
@@ -90,25 +90,19 @@ export function identifyChord(notes: string[]): ChordResult | null {
   return null;
 }
 
-// ─── Check if a set of notes on the field can play a specific card ───────────
-export function canPlayCard(requiredNotes: string[], fieldNotes: string[]): boolean {
-  const required = [...requiredNotes];
-  const available = [...fieldNotes];
-  for (const note of required) {
-    const idx = available.findIndex(n => noteToSemitone(n) === noteToSemitone(note));
-    if (idx === -1) return false;
-    available.splice(idx, 1);
-  }
-  return true;
+// ─── Pitch helpers ───────────────────────────────────────────────────────────
+// Card costs use note names ('C#', 'Db'); reserves and pools are keyed by NoteId ('Cs').
+export function noteIdOf(note: string): NoteId | undefined {
+  const semitone = noteToSemitone(note);
+  return NOTES.find(n => n.semitone === semitone)?.id;
+}
+
+// Same set of pitch classes, regardless of spelling or order (e.g. a CEG spell matches a CEG spirit)
+export function samePitchClasses(a: string[], b: string[]): boolean {
+  const key = (notes: string[]) => Array.from(new Set(notes.map(noteToSemitone))).sort((x, y) => x - y).join(',');
+  return key(a) === key(b);
 }
 
 // ─── C Major key definition ──────────────────────────────────────────────────
 export const C_MAJOR_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 export const A_MINOR_NOTES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
-
-// ─── Chord progression validation ────────────────────────────────────────────
-export function validateProgression(chordNames: string[]): boolean {
-  // For now: valid if it contains known musical progressions
-  // This is a placeholder — expand as more progressions are added
-  return chordNames.length >= 2;
-}

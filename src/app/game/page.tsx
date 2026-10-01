@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import GameBoard from '@/components/game/GameBoard';
 import { loadLoadout, getDefaultLoadout, addCardsToCollection } from '@/lib/storage';
 import { MUSICIANS, INSTRUMENTS, buildDeckFromIds, getStarterDeck } from '@/data/cards';
+import { DECK_MIN } from '@/lib/rules';
 import type { MusicianCard, InstrumentCard, AnyCard } from '@/types';
 
 export default function GamePage() {
@@ -20,15 +21,15 @@ export default function GamePage() {
     const d = buildDeckFromIds(loadout.deckCardIds);
     setMusician(m);
     setInstrument(i);
-    setDeck(d.length >= 20 ? d : getStarterDeck());
+    setDeck(d.length >= DECK_MIN ? d : getStarterDeck());
     setReady(true);
   }, []);
 
   const handleGameOver = (winner: 'player' | 'ai') => {
     if (winner === 'player') {
-      // Award 3 random cards from the pool on win
+      // Award 2 random cards from the pool on win (copy first: sort() would reorder the shared ALL_CARDS)
       const { ALL_CARDS } = require('@/data/cards');
-      const rewards = ALL_CARDS.sort(() => Math.random() - 0.5).slice(0, 2).map((c: AnyCard) => c.id);
+      const rewards = [...ALL_CARDS].sort(() => Math.random() - 0.5).slice(0, 2).map((c: AnyCard) => c.id);
       addCardsToCollection(rewards);
     }
   };

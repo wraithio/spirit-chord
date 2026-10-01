@@ -1,10 +1,15 @@
 import type {
-  GameState, GameAction, PlayerState, FieldSpirit,
-  NoteOnField, AnyCard, ChordSpiritCard, ChordProgressionCard,
-  SongSpellCard, NoteId, MusicianCard, InstrumentCard,
+  AnyCard, ChordSpellCard, FieldSpirit, GameAction, GameState, InstrumentCard, MusicianCard, NoteCounts,
+  PlayerState, Side, SpellTarget, SpiritCard,
 } from '@/types';
-import { canPlayCard } from './musicTheory';
 import { NOTE_MAP } from './musicTheory';
+import {
+  LANE_COUNT, STARTING_HAND, buildReserve, canAddNote, canAttack, canMove, castLanes, currentPower, findSpirit,
+  harmonyOf, isMyTurn, laneOf, opponentOf, payNotes, sameTarget, samePayment, songSpiritMaterials,
+  spellPaymentOptions, spellTargets,
+} from './rules';
+
+// Rules: docs/rules.md. Legality checks live in ./rules so the AI and UI can share them.
 
 let instanceCounter = 0;
 export function newInstanceId(prefix: string): string {
@@ -21,476 +26,339 @@ export function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+const sideName = (side: Side) => (side === 'player' ? 'Player' : 'AI');
+
+function addLog(state: GameState, msg: string): GameState {
+  return { ...state, log: [...state.log.slice(-39), msg] };
+}
+
 // ─── Create Player State ──────────────────────────────────────────────────────
 export function createPlayerState(
-  id: 'player' | 'ai',
+  id: Side,
   musician: MusicianCard,
   instrument: InstrumentCard,
   deckCards: AnyCard[]
 ): PlayerState {
   const shuffled = shuffle(deckCards);
-  const hand = shuffled.slice(0, 7);
-  const deck = shuffled.slice(7);
   return {
     id,
     musician,
     instrument,
     hp: musician.hp,
     maxHp: musician.hp,
-    deck,
-    hand,
+    deck: shuffled.slice(STARTING_HAND),
+    hand: shuffled.slice(0, STARTING_HAND),
     graveyard: [],
-    noteField: [],
-    playedNoteThisTurn: false,
-    chordField: [],
+    reserve: buildReserve(instrument),
+    pool: {},
+    tappedPool: {},
+    notesAddedThisTurn: 0,
+    lanes: Array(LANE_COUNT).fill(null),
+    movedThisTurn: false,
+    songSpiritCast: false,
+    mulliganDone: false,
   };
 }
 
-// ─── Can play chord card check ────────────────────────────────────────────────
-export function canAffordCard(card: AnyCard, noteField: NoteOnField[], chordField: FieldSpirit[]): boolean {
-  if (card.type === 'chord-spirit' || card.type === 'song-spell') {
-    const fieldNoteNames = noteField.map(n => n.chosenNote);
-    return canPlayCard(card.requiredNotes, fieldNoteNames);
-  }
-  if (card.type === 'chord-progression') {
-    const prog = card as ChordProgressionCard;
-    const fieldCardIds = chordField.map(s => s.card.id);
-    return prog.requiredChordIds.every(reqId => fieldCardIds.includes(reqId));
-  }
-  return false;
-}
-
-// ─── Draw card ────────────────────────────────────────────────────────────────
-function drawCard(state: PlayerState, count: number = 1): PlayerState {
-  let s = { ...state };
-  for (let i = 0; i < count; i++) {
-    if (s.deck.length === 0) break;
-    const [drawn, ...rest] = s.deck;
-    s = { ...s, deck: rest, hand: [...s.hand, drawn] };
-  }
-  return s;
-}
-
-// ─── Apply note costs (remove notes from field) ───────────────────────────────
-function consumeNotes(noteField: NoteOnField[], requiredNotes: string[]): NoteOnField[] {
-  const remaining = [...noteField];
-  for (const reqNote of requiredNotes) {
-    const idx = remaining.findIndex(n =>
-      n.chosenNote === reqNote ||
-      NOTE_MAP[n.noteId]?.primaryNote === reqNote ||
-      NOTE_MAP[n.noteId]?.altNote === reqNote
-    );
-    if (idx !== -1) remaining.splice(idx, 1);
-  }
-  return remaining;
-}
-
-// ─── Create FieldSpirit from card ─────────────────────────────────────────────
-function makeFieldSpirit(card: ChordSpiritCard | ChordProgressionCard): FieldSpirit {
-  const hasKeywords = (card as ChordSpiritCard).keywords ?? (card as ChordProgressionCard).keywords ?? [];
-  const hasTempo = hasKeywords.includes('Tempo');
+function makeFieldSpirit(card: SpiritCard): FieldSpirit {
   return {
     instanceId: newInstanceId(card.id),
     card,
-    currentStrength: (card as ChordSpiritCard).strength ?? (card as ChordProgressionCard).strength ?? 0,
-    currentWill: (card as ChordSpiritCard).will ?? (card as ChordProgressionCard).will ?? 0,
-    canChallenge: hasTempo,
-    isExhausted: false,
-    hasTaunt: hasKeywords.includes('Taunt'),
-    tempBuffs: [],
+    damage: 0,
+    tempPower: 0,
+    harmony: card.harmony,
+    attachments: [],
+    isTapped: false,
+    enteredThisTurn: true,
   };
 }
 
-// ─── Apply spell effect ───────────────────────────────────────────────────────
-function applySpell(
-  state: GameState,
-  spell: SongSpellCard,
-  who: 'player' | 'ai',
-  targetInstanceId?: string
-): GameState {
-  const s = { ...state };
-  const { effect } = spell;
-  const opp = who === 'player' ? 'ai' : 'player';
+// ─── Small state updaters ─────────────────────────────────────────────────────
+function updateSpirit(ps: PlayerState, instanceId: string, fn: (sp: FieldSpirit) => FieldSpirit): PlayerState {
+  return { ...ps, lanes: ps.lanes.map(sp => (sp?.instanceId === instanceId ? fn(sp) : sp)) };
+}
 
-  if (effect.kind === 'draw') {
-    s[who] = drawCard(s[who], effect.amount);
-    return addLog(s, `${spell.name}: drew ${effect.amount} card(s).`);
+// Leaving the field sends the spirit and anything attached to it to the discard
+function removeSpirit(ps: PlayerState, instanceId: string): PlayerState {
+  const sp = ps.lanes.find(s => s?.instanceId === instanceId);
+  if (!sp) return ps;
+  return {
+    ...ps,
+    lanes: ps.lanes.map(s => (s?.instanceId === instanceId ? null : s)),
+    graveyard: [...ps.graveyard, sp.card, ...sp.attachments.map(a => a.card)],
+  };
+}
+
+function removeFromHand(ps: PlayerState, cardId: string): PlayerState {
+  const idx = ps.hand.findIndex(c => c.id === cardId);
+  return idx === -1 ? ps : { ...ps, hand: ps.hand.filter((_, i) => i !== idx) };
+}
+
+// Strip one Harmony: printed tokens first, then the newest attachment (which goes to the discard)
+function stripHarmony(ps: PlayerState, instanceId: string): PlayerState {
+  const sp = ps.lanes.find(s => s?.instanceId === instanceId);
+  if (!sp) return ps;
+  if (sp.harmony > 0) return updateSpirit(ps, instanceId, s => ({ ...s, harmony: s.harmony - 1 }));
+  const removed = sp.attachments[sp.attachments.length - 1];
+  if (!removed) return ps;
+  return {
+    ...updateSpirit(ps, instanceId, s => ({ ...s, attachments: s.attachments.slice(0, -1) })),
+    graveyard: [...ps.graveyard, removed.card],
+  };
+}
+
+function drawCard(ps: PlayerState): PlayerState {
+  if (ps.deck.length === 0) return ps;  // no deck-out loss: just skip the draw
+  const [drawn, ...rest] = ps.deck;
+  return { ...ps, deck: rest, hand: [...ps.hand, drawn] };
+}
+
+function mergeCounts(a: NoteCounts, b: NoteCounts): NoteCounts {
+  const out: NoteCounts = { ...a };
+  for (const [id, n] of Object.entries(b) as [keyof NoteCounts, number][]) out[id] = (out[id] ?? 0) + n;
+  return out;
+}
+
+// ─── Turn flow ────────────────────────────────────────────────────────────────
+// Untap, then draw (the first player skips their first draw)
+function startTurn(state: GameState, who: Side, skipDraw: boolean): GameState {
+  let ps: PlayerState = {
+    ...state[who],
+    pool: mergeCounts(state[who].pool, state[who].tappedPool),
+    tappedPool: {},
+    lanes: state[who].lanes.map(sp => (sp ? { ...sp, isTapped: false, enteredThisTurn: false } : sp)),
+    notesAddedThisTurn: 0,
+    movedThisTurn: false,
+  };
+  let s: GameState = { ...state, currentPlayer: who, selectedHandIndex: null, selectedSpiritId: null };
+  s = addLog(s, `--- ${sideName(who)}'s turn ---`);
+  if (!skipDraw) {
+    if (ps.deck.length === 0) s = addLog(s, `${sideName(who)} has no cards left and skips the draw.`);
+    ps = drawCard(ps);
   }
+  return { ...s, [who]: ps };
+}
 
-  if (effect.kind === 'stat-buff' || effect.kind === 'stat-debuff') {
-    const delta = effect.kind === 'stat-buff' ? effect.amount : -effect.amount;
-    const target = effect.target;
+// At the end of each turn, until-end-of-turn changes expire and damage on survivors clears
+function endOfTurnCleanup(ps: PlayerState): PlayerState {
+  return { ...ps, lanes: ps.lanes.map(sp => (sp ? { ...sp, tempPower: 0, damage: 0 } : sp)) };
+}
 
-    if (target === 'all-friendly') {
-      s[who] = {
-        ...s[who],
-        chordField: s[who].chordField.map(sp => ({
-          ...sp,
-          currentStrength: effect.stat === 'strength' ? sp.currentStrength + delta : sp.currentStrength,
-          currentWill: effect.stat === 'will' ? sp.currentWill + delta : sp.currentWill,
-        })),
-      };
-      return addLog(s, `${spell.name}: all friendly spirits +${delta} ${effect.stat}.`);
-    }
-
-    if (target === 'all-enemy') {
-      s[opp] = {
-        ...s[opp],
-        chordField: s[opp].chordField.map(sp => ({
-          ...sp,
-          currentStrength: effect.stat === 'strength' ? sp.currentStrength + delta : sp.currentStrength,
-          currentWill: effect.stat === 'will' ? sp.currentWill + delta : sp.currentWill,
-        })),
-      };
-      return addLog(s, `${spell.name}: all enemy spirits ${delta} ${effect.stat}.`);
-    }
-
-    // Target a specific spirit
-    if (targetInstanceId) {
-      for (const side of ['player', 'ai'] as const) {
-        const idx = s[side].chordField.findIndex(sp => sp.instanceId === targetInstanceId);
-        if (idx !== -1) {
-          const updated = [...s[side].chordField];
-          const sp = { ...updated[idx] };
-          if (effect.stat === 'strength') sp.currentStrength += delta;
-          if (effect.stat === 'will') sp.currentWill += delta;
-          updated[idx] = sp;
-          s[side] = { ...s[side], chordField: updated };
-          // If will hits 0, remove
-          if (sp.currentWill <= 0) {
-            s[side] = {
-              ...s[side],
-              chordField: s[side].chordField.filter(x => x.instanceId !== targetInstanceId),
-              graveyard: [...s[side].graveyard, sp.card],
-            };
-          }
-          break;
-        }
-      }
-    }
-    return addLog(s, `${spell.name} applied!`);
-  }
-
-  if (effect.kind === 'damage' && targetInstanceId) {
+// State-based checks after every action: spirits at 0 Power die (repeat, since losing an aura
+// can drop others to 0), then a player at 0 life loses.
+function resolveDeaths(state: GameState): GameState {
+  let s = state;
+  for (let guard = 0; guard < 10; guard++) {
+    let changed = false;
     for (const side of ['player', 'ai'] as const) {
-      const idx = s[side].chordField.findIndex(sp => sp.instanceId === targetInstanceId);
-      if (idx !== -1) {
-        const updated = [...s[side].chordField];
-        const sp = { ...updated[idx], currentWill: updated[idx].currentWill - effect.amount };
-        if (sp.currentWill <= 0) {
-          s[side] = {
-            ...s[side],
-            chordField: updated.filter((_, i) => i !== idx),
-            graveyard: [...s[side].graveyard, sp.card],
-          };
-        } else {
-          updated[idx] = sp;
-          s[side] = { ...s[side], chordField: updated };
-        }
-        return addLog(s, `${spell.name}: dealt ${effect.amount} damage!`);
+      const dead = s[side].lanes.filter((sp): sp is FieldSpirit => sp !== null && currentPower(s[side], sp) <= 0);
+      for (const sp of dead) {
+        s = { ...s, [side]: removeSpirit(s[side], sp.instanceId) };
+        s = addLog(s, `${sp.card.name} (${sideName(side)}) is destroyed!`);
+        changed = true;
       }
     }
+    if (!changed) break;
   }
-
+  if (s.phase !== 'game-over' && (s.player.hp <= 0 || s.ai.hp <= 0)) {
+    const winner: Side = s.ai.hp <= 0 ? (s.player.hp <= 0 ? s.currentPlayer : 'player') : 'ai';
+    s = addLog({ ...s, phase: 'game-over', winner, selectedHandIndex: null, selectedSpiritId: null }, `${sideName(winner)} wins!`);
+  }
   return s;
 }
 
-function addLog(state: GameState, msg: string): GameState {
-  return { ...state, log: [...state.log.slice(-19), msg] };
+// ─── Spells ───────────────────────────────────────────────────────────────────
+function applySpell(state: GameState, who: Side, spell: ChordSpellCard, t: SpellTarget): GameState {
+  let s = state;
+  const effect = spell.effect;
+  const discardSpell = (st: GameState) => ({ ...st, [who]: { ...st[who], graveyard: [...st[who].graveyard, spell] } });
+
+  if (t.kind === 'player') {
+    if (effect.kind === 'damage') {
+      s = { ...s, [t.side]: { ...s[t.side], hp: s[t.side].hp - effect.amount } };
+      s = addLog(s, `${spell.name} deals ${effect.amount} damage to ${sideName(t.side)}!`);
+    }
+    return discardSpell(s);
+  }
+
+  const found = findSpirit(s, t.instanceId);
+  if (!found) return discardSpell(s);
+  const { side, spirit } = found;
+  const name = `${spirit.card.name} (${sideName(side)})`;
+
+  switch (effect.kind) {
+    case 'damage':
+      s = { ...s, [side]: updateSpirit(s[side], spirit.instanceId, sp => ({ ...sp, damage: sp.damage + effect.amount })) };
+      return discardSpell(addLog(s, `${spell.name} deals ${effect.amount} damage to ${name}.`));
+    case 'power':
+      s = { ...s, [side]: updateSpirit(s[side], spirit.instanceId, sp => ({ ...sp, tempPower: sp.tempPower + effect.amount })) };
+      return discardSpell(addLog(s, `${spell.name}: ${name} gets ${effect.amount > 0 ? '+' : ''}${effect.amount} Power until end of turn.`));
+    case 'attach':
+      s = {
+        ...s,
+        [side]: updateSpirit(s[side], spirit.instanceId, sp => ({
+          ...sp,
+          attachments: [...sp.attachments, { card: spell, power: effect.power, spellproof: effect.spellproof }],
+        })),
+      };
+      return addLog(s, `${spell.name} attaches to ${name}.`);
+    case 'remove-harmony': {
+      const attached = spirit.attachments.map(a => a.card);
+      s = {
+        ...s,
+        [side]: {
+          ...updateSpirit(s[side], spirit.instanceId, sp => ({ ...sp, harmony: 0, attachments: [] })),
+          graveyard: [...s[side].graveyard, ...attached],
+        },
+      };
+      return discardSpell(addLog(s, `${spell.name} removes all Harmony from ${name}.`));
+    }
+    case 'counter':
+      return state;  // not castable until instant speed exists
+  }
 }
 
-// ─── End-of-turn cleanup ──────────────────────────────────────────────────────
-function endTurnCleanup(state: GameState, who: 'player' | 'ai'): GameState {
-  const s = { ...state };
+// ─── Combat ───────────────────────────────────────────────────────────────────
+function resolveAttack(state: GameState, who: Side, attacker: FieldSpirit): GameState {
+  const opp = opponentOf(who);
+  const lane = laneOf(state[who], attacker.instanceId);
+  let s: GameState = { ...state, [who]: updateSpirit(state[who], attacker.instanceId, sp => ({ ...sp, isTapped: true })) };
+  const atkPower = currentPower(s[who], attacker);
+  const defender = s[opp].lanes[lane];
 
-  // Expire temp buffs and reset spirits for next turn (un-exhaust, enable challenge)
-  s[who] = {
-    ...s[who],
-    chordField: s[who].chordField.map(sp => ({
-      ...sp,
-      isExhausted: false,
-      canChallenge: true, // spirits can now challenge next turn
-    })),
-    playedNoteThisTurn: false,
-    noteField: s[who].noteField, // notes persist
+  if (!defender) {
+    s = { ...s, [opp]: { ...s[opp], hp: s[opp].hp - atkPower } };
+    return addLog(s, `${attacker.card.name} attacks down lane ${lane + 1} and hits ${sideName(opp)} for ${atkPower}!`);
+  }
+
+  if (harmonyOf(defender) > 0) {
+    s = { ...s, [opp]: stripHarmony(s[opp], defender.instanceId) };
+    return addLog(s, `${defender.card.name}'s Harmony cancels ${attacker.card.name}'s attack.`);
+  }
+
+  // Power is both attack and health: both deal damage at the same time
+  const defPower = currentPower(s[opp], defender);
+  s = {
+    ...s,
+    [opp]: updateSpirit(s[opp], defender.instanceId, sp => ({ ...sp, damage: sp.damage + atkPower })),
+    [who]: updateSpirit(s[who], attacker.instanceId, sp => ({ ...sp, damage: sp.damage + defPower })),
   };
-
-  return s;
-}
-
-// ─── Combat resolution ────────────────────────────────────────────────────────
-function resolveAttack(
-  state: GameState,
-  who: 'player' | 'ai',
-  attackerInstanceId: string,
-  targetInstanceId: string | 'hero'
-): GameState {
-  let s = { ...state };
-  const opp = who === 'player' ? 'ai' : 'player';
-
-  const attackerIdx = s[who].chordField.findIndex(sp => sp.instanceId === attackerInstanceId);
-  if (attackerIdx === -1) return s;
-  const attacker = s[who].chordField[attackerIdx];
-
-  if (!attacker.canChallenge || attacker.isExhausted) return s;
-
-  // Mark attacker as exhausted
-  const newAttackerField = [...s[who].chordField];
-  newAttackerField[attackerIdx] = { ...attacker, isExhausted: true };
-  s[who] = { ...s[who], chordField: newAttackerField };
-
-  if (targetInstanceId === 'hero') {
-    s[opp] = { ...s[opp], hp: s[opp].hp - attacker.currentStrength };
-    s = addLog(s, `${attacker.card.name} attacks ${opp} hero for ${attacker.currentStrength} damage!`);
-    if (s[opp].hp <= 0) {
-      s = { ...s, phase: 'game-over', winner: who };
-    }
-    return s;
-  }
-
-  // Target is a spirit
-  const defenderIdx = s[opp].chordField.findIndex(sp => sp.instanceId === targetInstanceId);
-  if (defenderIdx === -1) return s;
-  const defender = s[opp].chordField[defenderIdx];
-
-  const atkStr = attacker.currentStrength;
-  const defWill = defender.currentWill;
-  const defStr = defender.currentStrength;
-  const atkWill = attacker.currentWill;
-
-  let newDefWill = defWill - atkStr;
-  let newAtkWill = atkWill - defStr;
-
-  s = addLog(s, `${attacker.card.name} (${atkStr}⚔) challenges ${defender.card.name} (${defStr}⚔ ${defWill}🛡)!`);
-
-  // Transfer keyword (trample)
-  const hasTransfer = (attacker.card as ChordSpiritCard).keywords?.includes('Transfer') ||
-    (attacker.card as ChordProgressionCard).keywords?.includes('Transfer');
-  if (hasTransfer && atkStr > defWill) {
-    s[opp] = { ...s[opp], hp: s[opp].hp - (atkStr - defWill) };
-    s = addLog(s, `Transfer! ${atkStr - defWill} excess damage to ${opp} hero!`);
-  }
-
-  // Fanfare Falcon debuff on damage
-  if (attacker.card.id === 'chord-ii-Dmin' && atkStr > 0) {
-    newDefWill -= 1;
-    s = addLog(s, `Fanfare Falcon's ability: ${defender.card.name} loses 1 will!`);
-  }
-
-  // Remove destroyed spirits
-  const oppField = s[opp].chordField.filter((_, i) => i !== defenderIdx);
-  const ownField = s[who].chordField.filter((_, i) => i !== attackerIdx);
-
-  if (newDefWill <= 0) {
-    s[opp] = { ...s[opp], chordField: oppField, graveyard: [...s[opp].graveyard, defender.card] };
-    s = addLog(s, `${defender.card.name} is defeated!`);
-  } else {
-    const updatedDef = { ...defender, currentWill: newDefWill };
-    const updatedOppField = [...s[opp].chordField];
-    updatedOppField[defenderIdx] = updatedDef;
-    s[opp] = { ...s[opp], chordField: updatedOppField };
-  }
-
-  if (newAtkWill <= 0) {
-    s[who] = { ...s[who], chordField: ownField, graveyard: [...s[who].graveyard, attacker.card] };
-    s = addLog(s, `${attacker.card.name} is defeated in combat!`);
-  } else {
-    const newField = [...s[who].chordField];
-    const idx2 = newField.findIndex(sp => sp.instanceId === attackerInstanceId);
-    if (idx2 !== -1) newField[idx2] = { ...newField[idx2], currentWill: newAtkWill };
-    s[who] = { ...s[who], chordField: newField };
-  }
-
-  // Aeolian Fox heal
-  if (defender.card.id === 'chord-vi-Amin' && defStr > 0) {
-    const healSide = opp === 'player' ? 'player' : 'ai';
-    s[healSide] = { ...s[healSide], hp: Math.min(s[healSide].maxHp, s[healSide].hp + 1) };
-    s = addLog(s, `Aeolian Fox restores 1 HP to ${healSide}!`);
-  }
-
-  // Flute Flies buff on survive
-  if (attacker.card.id === 'chord-iii-Emin' && newAtkWill > 0) {
-    const idx2 = s[who].chordField.findIndex(sp => sp.instanceId === attackerInstanceId);
-    if (idx2 !== -1) {
-      const f = [...s[who].chordField];
-      f[idx2] = { ...f[idx2], currentWill: f[idx2].currentWill + 1 };
-      s[who] = { ...s[who], chordField: f };
-      s = addLog(s, `Flute Flies gains +1 will from surviving combat!`);
-    }
-  }
-
-  if (s[opp].hp <= 0) {
-    s = { ...s, phase: 'game-over', winner: who };
-  }
-
-  return s;
+  return addLog(s, `${attacker.card.name} (${atkPower}) clashes with ${defender.card.name} (${defPower}) in lane ${lane + 1}.`);
 }
 
 // ─── Main Reducer ─────────────────────────────────────────────────────────────
 export function gameReducer(state: GameState, action: GameAction): GameState {
+  const next = reduce(state, action);
+  return next === state ? state : resolveDeaths(next);
+}
+
+function reduce(state: GameState, action: GameAction): GameState {
   switch (action.type) {
-    case 'DRAW_CARD': {
-      const s = { ...state };
-      s[action.who] = drawCard(s[action.who]);
-      return addLog(s, `${action.who} draws a card.`);
-    }
-
-    case 'PLAY_NOTE': {
-      const { who, noteId, chosenNote } = action;
+    case 'KEEP_HAND':
+    case 'MULLIGAN': {
+      const { who } = action;
       const ps = state[who];
-      if (ps.playedNoteThisTurn) return state;
+      if (state.phase !== 'mulligan' || ps.mulliganDone) return state;
 
-      const noteOnField: NoteOnField = {
-        instanceId: newInstanceId('note'),
-        noteId,
-        chosenNote,
-        semitone: NOTE_MAP[noteId]?.semitone ?? 0,
-      };
-
-      const newState = {
-        ...state,
-        [who]: {
-          ...ps,
-          noteField: [...ps.noteField, noteOnField],
-          playedNoteThisTurn: true,
-        },
-      };
-      return addLog(newState, `${who} plays Note Spirit: ${chosenNote}`);
-    }
-
-    case 'PLAY_CARD': {
-      const { who, cardId, targetInstanceId } = action;
-      const ps = state[who];
-      const cardIdx = ps.hand.findIndex(c => c.id === cardId);
-      if (cardIdx === -1) return state;
-      const card = ps.hand[cardIdx];
-      const newHand = ps.hand.filter((_, i) => i !== cardIdx);
-
-      if (!canAffordCard(card, ps.noteField, ps.chordField)) return state;
-
-      let s = { ...state };
-
-      if (card.type === 'chord-spirit') {
-        const cs = card as ChordSpiritCard;
-        const remainingNotes = consumeNotes(ps.noteField, cs.requiredNotes);
-        const spirit = makeFieldSpirit(cs);
-        s[who] = {
-          ...ps,
-          hand: newHand,
-          noteField: remainingNotes,
-          chordField: [...ps.chordField, spirit],
-        };
-        s = addLog(s, `${who} plays ${cs.name} (${cs.chordName})!`);
-
-        // Entry effects
-        if (cs.id === 'chord-IV-Fmaj') {
-          s[who] = drawCard(s[who]);
-          s = addLog(s, `Subdominant Sage: draw 1 card.`);
-        }
-        if (cs.id === 'chord-vii-Bdim') {
-          // Deal 1 damage to cheapest enemy spirit
-          const targets = s[who === 'player' ? 'ai' : 'player'].chordField;
-          if (targets.length > 0) {
-            const t = targets.reduce((a, b) => a.currentWill < b.currentWill ? a : b);
-            s = resolveAttack(s, who, spirit.instanceId, t.instanceId);
-            // Actually just damage, not full combat — adjust
-          }
-        }
-      } else if (card.type === 'song-spell') {
-        const spell = card as SongSpellCard;
-        const remainingNotes = consumeNotes(ps.noteField, spell.requiredNotes);
-        s[who] = { ...ps, hand: newHand, noteField: remainingNotes, graveyard: [...ps.graveyard, card] };
-        s = applySpell(s, spell, who, targetInstanceId);
-      } else if (card.type === 'chord-progression') {
-        const prog = card as ChordProgressionCard;
-        // Consume required chord spirits from field
-        const toConsume = prog.requiredChordIds;
-        let newChordField = [...ps.chordField];
-        const consumed: (ChordSpiritCard | ChordProgressionCard)[] = [];
-
-        for (const reqId of toConsume) {
-          const idx = newChordField.findIndex(sp => sp.card.id === reqId);
-          if (idx !== -1) {
-            consumed.push(newChordField[idx].card);
-            newChordField.splice(idx, 1);
-          }
-        }
-
-        if (prog.isMinion) {
-          const spirit = makeFieldSpirit(prog);
-          s[who] = {
-            ...ps,
-            hand: newHand,
-            chordField: [...newChordField, spirit],
-            graveyard: [...ps.graveyard, ...consumed],
-          };
-          s = addLog(s, `${who} unleashes Chord Progression: ${prog.name}!`);
-
-          // Stallion search effect
-          if (prog.id === 'prog-I-IV-stallion') {
-            const chordCards = s[who].deck.filter(c => c.type === 'chord-spirit' || c.type === 'chord-progression');
-            if (chordCards.length > 0) {
-              const found = chordCards[0];
-              s[who] = {
-                ...s[who],
-                deck: shuffle(s[who].deck.filter(c => c !== found)),
-                hand: [...s[who].hand, found],
-              };
-              s = addLog(s, `Sustainin' Stallion: searched deck for ${found.name}!`);
-            }
-          }
-        } else {
-          // Spell progression
-          s[who] = {
-            ...ps,
-            hand: newHand,
-            chordField: newChordField,
-            graveyard: [...ps.graveyard, card, ...consumed],
-          };
-          if (prog.effect) {
-            // Apply as buff to all friendly
-            if (prog.effect.kind === 'stat-buff' && prog.effect.target === 'all-friendly') {
-              s[who] = {
-                ...s[who],
-                chordField: s[who].chordField.map(sp => ({
-                  ...sp,
-                  currentStrength: sp.currentStrength + (prog.effect!.kind === 'stat-buff' ? prog.effect!.amount : 0),
-                  currentWill: sp.currentWill + (prog.effect!.kind === 'stat-buff' ? prog.effect!.amount : 0),
-                })),
-              };
-              s[who] = drawCard(s[who], 2);
-              s = addLog(s, `${prog.name}: all spirits gain +${prog.effect.amount} str & +2 will! Drew 2 cards.`);
-            }
-          }
-        }
+      let updated: PlayerState = { ...ps, mulliganDone: true };
+      if (action.type === 'MULLIGAN') {
+        const reshuffled = shuffle([...ps.deck, ...ps.hand]);
+        updated = { ...updated, hand: reshuffled.slice(0, ps.hand.length), deck: reshuffled.slice(ps.hand.length) };
       }
-
+      let s = addLog({ ...state, [who]: updated }, `${sideName(who)} ${action.type === 'MULLIGAN' ? 'mulligans' : 'keeps their hand'}.`);
+      if (s.player.mulliganDone && s.ai.mulliganDone) {
+        s = startTurn({ ...s, phase: 'playing' }, s.firstPlayer, true);
+      }
       return s;
     }
 
-    case 'DECLARE_ATTACK': {
-      return resolveAttack(state, action.who, action.attackerInstanceId, action.targetInstanceId);
+    case 'ADD_NOTE': {
+      const { who, noteId } = action;
+      if (!canAddNote(state, who, noteId)) return state;
+      const ps = state[who];
+      const updated: PlayerState = {
+        ...ps,
+        reserve: { ...ps.reserve, [noteId]: (ps.reserve[noteId] ?? 0) - 1 },
+        pool: { ...ps.pool, [noteId]: (ps.pool[noteId] ?? 0) + 1 },
+        notesAddedThisTurn: ps.notesAddedThisTurn + 1,
+      };
+      return addLog({ ...state, [who]: updated }, `${sideName(who)} adds ${NOTE_MAP[noteId].name} to their note pool.`);
+    }
+
+    case 'CAST_SPIRIT': {
+      const { who, cardId, lane } = action;
+      const ps = state[who];
+      const card = ps.hand.find(c => c.id === cardId);
+      if (!card || card.type === 'chord-spell' || !castLanes(state, who, card).includes(lane)) return state;
+
+      let updated = removeFromHand(ps, cardId);
+      if (card.type === 'chord-spirit') {
+        updated = payNotes(updated, card.requiredNotes);
+      } else {
+        // Song spirit: the combined chord spirits leave the board
+        for (const material of songSpiritMaterials(ps, card)!) updated = removeSpirit(updated, material.instanceId);
+        updated = { ...updated, songSpiritCast: true };
+      }
+      updated = { ...updated, lanes: updated.lanes.map((sp, i) => (i === lane ? makeFieldSpirit(card) : sp)) };
+      const verb = card.type === 'song-spirit' ? 'combines four chords into' : 'casts';
+      return addLog(
+        { ...state, [who]: updated, selectedHandIndex: null, selectedSpiritId: null },
+        `${sideName(who)} ${verb} ${card.name} in lane ${lane + 1}.`,
+      );
+    }
+
+    case 'CAST_SPELL': {
+      const { who, cardId, target, payment } = action;
+      const ps = state[who];
+      const card = ps.hand.find((c): c is ChordSpellCard => c.id === cardId && c.type === 'chord-spell');
+      if (!card) return state;
+      if (!spellPaymentOptions(state, who, card).some(p => samePayment(p, payment))) return state;
+      if (!spellTargets(state, card).some(t => sameTarget(t, target))) return state;
+
+      let updated = removeFromHand(ps, cardId);
+      updated = payment.kind === 'notes'
+        ? payNotes(updated, card.requiredNotes)
+        : updateSpirit(updated, payment.instanceId, sp => ({ ...sp, isTapped: true }));
+      let s: GameState = { ...state, [who]: updated, selectedHandIndex: null, selectedSpiritId: null };
+      const paidWith = payment.kind === 'notes' ? 'notes' : `tapping ${findSpirit(s, payment.instanceId)?.spirit.card.name}`;
+      s = addLog(s, `${sideName(who)} casts ${card.name} (paid with ${paidWith}).`);
+      return applySpell(s, who, card, target);
+    }
+
+    case 'MOVE_SPIRIT': {
+      const { who, instanceId, lane } = action;
+      const ps = state[who];
+      const sp = ps.lanes.find(s => s?.instanceId === instanceId);
+      if (!sp || !canMove(state, who, sp, lane)) return state;
+      const updated: PlayerState = {
+        ...ps,
+        lanes: ps.lanes.map((s, i) => (i === lane ? sp : s?.instanceId === instanceId ? null : s)),
+        movedThisTurn: true,
+      };
+      return addLog({ ...state, [who]: updated, selectedSpiritId: null }, `${sideName(who)} moves ${sp.card.name} to lane ${lane + 1}.`);
+    }
+
+    case 'ATTACK': {
+      const { who, instanceId } = action;
+      const sp = state[who].lanes.find(s => s?.instanceId === instanceId);
+      if (!sp || !canAttack(state, who, sp)) return state;
+      return resolveAttack({ ...state, selectedSpiritId: null }, who, sp);
     }
 
     case 'END_TURN': {
       const { who } = action;
-      const opp = who === 'player' ? 'ai' : 'player';
-      let s = endTurnCleanup(state, who);
-      s = addLog(s, `--- ${opp}'s turn ---`);
-      s = { ...s, currentPlayer: opp, turnPhase: 'draw', turnNumber: s.turnNumber + (who === 'ai' ? 1 : 0) };
-      // Draw for next player
-      s[opp] = drawCard(s[opp]);
-      return s;
+      if (!isMyTurn(state, who)) return state;
+      const opp = opponentOf(who);
+      let s: GameState = { ...state, player: endOfTurnCleanup(state.player), ai: endOfTurnCleanup(state.ai) };
+      s = { ...s, turnNumber: s.turnNumber + (who === s.firstPlayer ? 0 : 1) };
+      return startTurn(s, opp, false);
     }
 
-    case 'SELECT_NOTE':
-      return { ...state, selectedNoteId: action.noteId };
-
     case 'SELECT_HAND_CARD':
-      return { ...state, selectedHandCardId: action.cardId };
+      return { ...state, selectedHandIndex: action.index, selectedSpiritId: null };
 
-    case 'SELECT_ATTACKER':
-      return { ...state, selectedAttackerInstanceId: action.instanceId, pendingTargetFor: action.instanceId ? 'attack' : null };
+    case 'SELECT_SPIRIT':
+      return { ...state, selectedSpiritId: action.instanceId, selectedHandIndex: null };
 
     default:
       return state;
@@ -506,17 +374,19 @@ export function createInitialState(
   aiInstrument: InstrumentCard,
   aiDeck: AnyCard[]
 ): GameState {
+  const firstPlayer: Side = Math.random() < 0.5 ? 'player' : 'ai';
   return {
-    phase: 'playing',
-    currentPlayer: 'player',
-    turnPhase: 'draw',
+    phase: 'mulligan',
+    currentPlayer: firstPlayer,
+    firstPlayer,
     turnNumber: 1,
     player: createPlayerState('player', playerMusician, playerInstrument, playerDeck),
     ai: createPlayerState('ai', aiMusician, aiInstrument, aiDeck),
-    log: ['Game started! Your turn.'],
-    selectedNoteId: null,
-    selectedHandCardId: null,
-    selectedAttackerInstanceId: null,
-    pendingTargetFor: null,
+    log: [
+      `Coin flip: ${firstPlayer === 'player' ? 'you go' : 'the AI goes'} first.`,
+      'Keep your opening hand or mulligan once.',
+    ],
+    selectedHandIndex: null,
+    selectedSpiritId: null,
   };
 }

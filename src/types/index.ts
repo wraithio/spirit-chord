@@ -1,79 +1,82 @@
-// ─── Note Spirits ───────────────────────────────────────────────────────────
+// Game rules: docs/rules.md
+
+// ─── Notes ──────────────────────────────────────────────────────────────────
 export type NoteId = 'C' | 'Cs' | 'D' | 'Ds' | 'E' | 'F' | 'Fs' | 'G' | 'Gs' | 'A' | 'As' | 'B';
 
-export interface NoteSpiritDef {
+// A pitch class. Notes are resources in a player's reserve/pool, never cards or spirits.
+export interface NoteDef {
   id: NoteId;
-  displayName: string;   // "C#/Db"
+  name: string;          // "C#/Db"
   primaryNote: string;   // "C#"
   altNote: string;       // "Db"
   semitone: number;      // 0–11
   frequency: number;     // Hz (C4 octave)
   color: string;         // CSS color for UI
-  strength: number;
-  will: number;
+  artGradient: string;
 }
 
+export type NoteCounts = Partial<Record<NoteId, number>>;
+
 // ─── Cards ──────────────────────────────────────────────────────────────────
-export type CardType = 'chord-spirit' | 'song-spell' | 'chord-progression';
+export type CardType = 'chord-spirit' | 'song-spirit' | 'chord-spell';
 
 export interface BaseCard {
   id: string;
   name: string;
   type: CardType;
-  key: string;           // "C major"
-  romanNumeral: string;  // "I", "ii", "iii"...
-  requiredNotes: string[];  // e.g. ['C','E','G']
-  abilityText: string;
-  rarity: 'common' | 'uncommon' | 'rare' | 'legendary';
+  romanNumeral: string;  // "I", "ii", "I–V–vi–IV"
   artGradient: string;   // CSS gradient for placeholder art
+  abilityText: string | null;
+  rarity: 'common' | 'uncommon' | 'rare' | 'legendary';
 }
 
 export interface ChordSpiritCard extends BaseCard {
   type: 'chord-spirit';
-  chordName: string;     // "C Major", "D Minor"
-  strength: number;
-  will: number;
+  chordName: string;       // "C Major"
+  requiredNotes: string[]; // e.g. ['C','E','G']
+  power: number;
+  harmony: number;
   keywords: Keyword[];
 }
 
-export interface SongSpellCard extends BaseCard {
-  type: 'song-spell';
+// Cast by combining chord spirits already on your board (e.g. the Sun Dragon)
+export interface SongSpiritCard extends BaseCard {
+  type: 'song-spirit';
+  requiredChordIds: string[];
+  power: number;
+  harmony: number;
+  keywords: Keyword[];
+  auraPower: number;       // bonus Power for your other spirits
+}
+
+export interface ChordSpellCard extends BaseCard {
+  type: 'chord-spell';
+  chordName: string;
+  requiredNotes: string[]; // also identifies which chord spirit can be tapped to pay for it
   effect: SpellEffect;
 }
 
-export interface ChordProgressionCard extends BaseCard {
-  type: 'chord-progression';
-  requiredChordIds: string[]; // card IDs of chord spirits needed on field
-  isMinion: boolean;
-  strength?: number;
-  will?: number;
-  keywords?: Keyword[];
-  effect?: SpellEffect;   // if isMinion=false, this fires instead
-}
+export type AnyCard = ChordSpiritCard | SongSpiritCard | ChordSpellCard;
+export type SpiritCard = ChordSpiritCard | SongSpiritCard;
 
-export type AnyCard = ChordSpiritCard | SongSpellCard | ChordProgressionCard;
-
-export type Keyword = 'Tempo' | 'Transfer' | 'Taunt' | 'Resonance';
+export type Keyword = 'Tempo' | 'Spellproof';
 
 export type SpellEffect =
-  | { kind: 'stat-buff';  stat: 'strength' | 'will'; amount: number; target: EffectTarget }
-  | { kind: 'stat-debuff'; stat: 'strength' | 'will'; amount: number; target: EffectTarget }
-  | { kind: 'draw'; amount: number }
-  | { kind: 'search'; cardType: CardType }
-  | { kind: 'heal'; amount: number; target: EffectTarget }
-  | { kind: 'damage'; amount: number; target: EffectTarget };
-
-export type EffectTarget = 'any-spirit' | 'friendly-spirit' | 'enemy-spirit' | 'enemy-hero' | 'friendly-hero' | 'all-friendly' | 'all-enemy';
+  | { kind: 'damage'; amount: number; canTargetPlayers: boolean }
+  | { kind: 'power'; amount: number }                         // until end of turn
+  | { kind: 'attach'; power: number; spellproof: boolean }    // counts as Harmony
+  | { kind: 'remove-harmony' }
+  | { kind: 'counter' };                                      // needs instant speed (not built yet)
 
 // ─── Musician & Instrument ──────────────────────────────────────────────────
+// Abilities are display-only for now.
 export interface MusicianCard {
   id: string;
   name: string;
   subtitle: string;
-  hp: number;
+  hp: number;              // starting life
   abilityText: string;
   abilityType: 'active' | 'passive';
-  abilityEffect?: SpellEffect;
   artGradient: string;
 }
 
@@ -82,88 +85,90 @@ export interface InstrumentCard {
   name: string;
   subtype: string;
   allowedKey: string;
-  allowedNotes: string[];  // notes the player's deck may use
+  allowedNotes: string[];  // the scale: 4 copies of each form the note reserve
   abilityText: string;
   abilityType: 'active' | 'passive';
-  abilityEffect?: SpellEffect;
   artGradient: string;
 }
 
 // ─── Battle State ───────────────────────────────────────────────────────────
+export type Side = 'player' | 'ai';
+
+export interface Attachment {
+  card: ChordSpellCard;    // goes to the discard when the attachment leaves
+  power: number;
+  spellproof: boolean;
+}
+
 export interface FieldSpirit {
   instanceId: string;
-  card: ChordSpiritCard | ChordProgressionCard;
-  currentStrength: number;
-  currentWill: number;
-  canChallenge: boolean;   // false = summoning sickness
-  isExhausted: boolean;
-  hasTaunt: boolean;
-  tempBuffs: TempBuff[];
-}
-
-export interface TempBuff {
-  stat: 'strength' | 'will';
-  amount: number;
-  expiresAfterTurn: number;
-}
-
-export interface NoteOnField {
-  instanceId: string;
-  noteId: NoteId;
-  chosenNote: string;  // 'C' or 'B#' (chosen variant)
-  semitone: number;
+  card: SpiritCard;
+  damage: number;            // cleared at the end of each turn
+  tempPower: number;         // until-end-of-turn changes
+  harmony: number;           // printed Harmony tokens left
+  attachments: Attachment[]; // each one also counts as a Harmony
+  isTapped: boolean;
+  enteredThisTurn: boolean;  // can't attack yet unless it has Tempo
 }
 
 export interface PlayerState {
-  id: 'player' | 'ai';
+  id: Side;
   musician: MusicianCard;
   instrument: InstrumentCard;
   hp: number;
   maxHp: number;
 
-  // Main deck
   deck: AnyCard[];
   hand: AnyCard[];
   graveyard: AnyCard[];
 
-  // Note field
-  noteField: NoteOnField[];
-  playedNoteThisTurn: boolean;
+  // Notes: reserve → (up to 3 per turn) → pool. Paying taps pool notes until your next turn.
+  reserve: NoteCounts;
+  pool: NoteCounts;        // untapped
+  tappedPool: NoteCounts;
+  notesAddedThisTurn: number;
 
-  // Chord field
-  chordField: FieldSpirit[];
+  lanes: (FieldSpirit | null)[];  // LANE_COUNT slots, lane i faces the opponent's lane i
+  movedThisTurn: boolean;
+  songSpiritCast: boolean;        // song spirits are once per game
+  mulliganDone: boolean;
 }
 
-export type TurnPhase = 'draw' | 'main' | 'attack' | 'end';
-
 export interface GameState {
-  phase: 'playing' | 'game-over';
-  currentPlayer: 'player' | 'ai';
-  turnPhase: TurnPhase;
+  phase: 'mulligan' | 'playing' | 'game-over';
+  currentPlayer: Side;
+  firstPlayer: Side;
   turnNumber: number;
   player: PlayerState;
   ai: PlayerState;
-  winner?: 'player' | 'ai';
+  winner?: Side;
   log: string[];
 
   // UI selection state
-  selectedNoteId: NoteId | null;
-  selectedHandCardId: string | null;
-  selectedAttackerInstanceId: string | null;
-  pendingTargetFor: 'attack' | 'spell' | null;
+  selectedHandIndex: number | null;
+  selectedSpiritId: string | null;  // own spirit picked to attack or move
 }
 
 // ─── Game Actions ────────────────────────────────────────────────────────────
+export type SpellTarget =
+  | { kind: 'spirit'; instanceId: string }
+  | { kind: 'player'; side: Side };
+
+export type SpellPayment =
+  | { kind: 'notes' }
+  | { kind: 'spirit'; instanceId: string };  // tap a matching chord spirit
+
 export type GameAction =
-  | { type: 'DRAW_CARD'; who: 'player' | 'ai' }
-  | { type: 'PLAY_NOTE'; who: 'player' | 'ai'; noteId: NoteId; chosenNote: string }
-  | { type: 'PLAY_CARD'; who: 'player' | 'ai'; cardId: string; targetInstanceId?: string }
-  | { type: 'DECLARE_ATTACK'; who: 'player' | 'ai'; attackerInstanceId: string; targetInstanceId: string | 'hero' }
-  | { type: 'END_TURN'; who: 'player' | 'ai' }
-  | { type: 'SELECT_NOTE'; noteId: NoteId | null }
-  | { type: 'SELECT_HAND_CARD'; cardId: string | null }
-  | { type: 'SELECT_ATTACKER'; instanceId: string | null }
-  | { type: 'DISMISS_LOG' };
+  | { type: 'KEEP_HAND'; who: Side }
+  | { type: 'MULLIGAN'; who: Side }
+  | { type: 'ADD_NOTE'; who: Side; noteId: NoteId }
+  | { type: 'CAST_SPIRIT'; who: Side; cardId: string; lane: number }
+  | { type: 'CAST_SPELL'; who: Side; cardId: string; target: SpellTarget; payment: SpellPayment }
+  | { type: 'MOVE_SPIRIT'; who: Side; instanceId: string; lane: number }
+  | { type: 'ATTACK'; who: Side; instanceId: string }
+  | { type: 'END_TURN'; who: Side }
+  | { type: 'SELECT_HAND_CARD'; index: number | null }
+  | { type: 'SELECT_SPIRIT'; instanceId: string | null };
 
 // ─── Collection ──────────────────────────────────────────────────────────────
 export interface Collection {

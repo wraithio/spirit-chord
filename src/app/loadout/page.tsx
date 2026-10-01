@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { MUSICIANS, INSTRUMENTS, ALL_CARDS, STARTER_DECK_IDS } from '@/data/cards';
 import { loadCollection, saveLoadout } from '@/lib/storage';
+import { DECK_MIN, DECK_MAX } from '@/lib/rules';
 import type { MusicianCard, InstrumentCard, AnyCard, Collection } from '@/types';
 import clsx from 'clsx';
 
@@ -32,7 +33,7 @@ export default function LoadoutPage() {
   );
 
   const deckCards = deck.map(id => ALL_CARDS.find(c => c.id === id)).filter(Boolean) as AnyCard[];
-  const deckValid = deck.length >= 20 && deck.length <= 30;
+  const deckValid = deck.length >= DECK_MIN && deck.length <= DECK_MAX;
 
   return (
     <div
@@ -128,7 +129,7 @@ export default function LoadoutPage() {
         {tab === 'instrument' && (
           <div>
             <p className="font-crimson text-white/40 italic mb-6 text-lg">
-              Choose your Combat Instrument — it defines your key and deck rules.
+              Choose your Combat Instrument — its scale sets the notes in your reserve (4 of each).
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {availableInstruments.map(inst => (
@@ -167,7 +168,7 @@ export default function LoadoutPage() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <p className="font-crimson text-white/40 italic text-lg">
-                Your deck: {deck.length} cards (20–30 required)
+                Your deck: {deck.length} cards ({DECK_MIN}–{DECK_MAX} required, max 1 song spirit)
               </p>
               <button
                 onClick={() => setDeck([...STARTER_DECK_IDS])}
@@ -180,7 +181,7 @@ export default function LoadoutPage() {
               {ALL_CARDS.map(card => {
                 const owned = collection?.cardCounts[card.id] ?? 0;
                 const inDeck = deck.filter(id => id === card.id).length;
-                const canAdd = inDeck < owned && deck.length < 30;
+                const canAdd = inDeck < owned && deck.length < DECK_MAX && !(card.type === 'song-spirit' && inDeck >= 1);
                 const canRemove = inDeck > 0;
                 if (owned === 0) return null;
 
@@ -238,7 +239,7 @@ export default function LoadoutPage() {
         </div>
         <div className="font-cinzel text-white/30 text-xs">
           <span className="text-gold-400/60">Deck:</span> {deck.length} cards
-          {!deckValid && <span className="text-red-400 ml-1">(need 20–30)</span>}
+          {!deckValid && <span className="text-red-400 ml-1">(need {DECK_MIN}–{DECK_MAX})</span>}
         </div>
       </div>
     </div>

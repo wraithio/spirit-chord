@@ -16,7 +16,7 @@ export default function HomePage() {
 
   return (
     <div
-      className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden"
+      className="relative min-h-screen flex flex-col items-center justify-center"
       style={{ background: 'linear-gradient(180deg, #04040f 0%, #080818 40%, #0d0d2b 100%)' }}
     >
       {/* Animated floating notes */}
@@ -120,10 +120,10 @@ export default function HomePage() {
           HOW TO PLAY
         </h3>
         <div className="space-y-2 font-crimson text-white/50 text-sm">
-          <p><span className="text-gold-400/70">1.</span> Play 1 Note Spirit per turn to build your chord</p>
-          <p><span className="text-gold-400/70">2.</span> Combine notes into Chord Spirits to summon fighters</p>
-          <p><span className="text-gold-400/70">3.</span> Stack Chord Spirits into powerful Chord Progressions</p>
-          <p><span className="text-gold-400/70">4.</span> Reduce the enemy Musician's HP to 0 to win!</p>
+          <p><span className="text-gold-400/70">1.</span> Add up to 3 notes a turn from your reserve to your note pool</p>
+          <p><span className="text-gold-400/70">2.</span> Tap notes to cast Chord Spirits into your four lanes, and Chord Spells</p>
+          <p><span className="text-gold-400/70">3.</span> Spirits attack straight across their lane, or hit the player if it's open</p>
+          <p><span className="text-gold-400/70">4.</span> Combine all four chords into the Sun Dragon, and bring the enemy Musician to 0 HP!</p>
         </div>
       </div>
 

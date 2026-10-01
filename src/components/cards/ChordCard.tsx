@@ -1,44 +1,77 @@
 'use client';
-import type { AnyCard, ChordSpiritCard, SongSpellCard, ChordProgressionCard, FieldSpirit } from '@/types';
+import type { AnyCard, FieldSpirit } from '@/types';
 import clsx from 'clsx';
+import { NOTE_MAP, noteIdOf } from '@/lib/musicTheory';
 
-// ─── Hand Card (shown in player's hand) ──────────────────────────────────────
+const TYPE_LABEL: Record<AnyCard['type'], string> = {
+  'chord-spirit': 'Chord Spirit',
+  'song-spirit': 'Song Spirit',
+  'chord-spell': 'Chord Spell',
+};
+const TYPE_COLOR: Record<AnyCard['type'], string> = {
+  'chord-spirit': '#9d4edd',
+  'song-spirit': '#d4af37',
+  'chord-spell': '#0ea5e9',
+};
+const TYPE_SYMBOL: Record<AnyCard['type'], string> = {
+  'chord-spirit': '♩',
+  'song-spirit': '♫',
+  'chord-spell': '♪',
+};
+
+// Colored note chips for a card's cost
+export function NoteCost({ notes, size = 'sm' }: { notes: string[]; size?: 'sm' | 'md' }) {
+  return (
+    <div className="flex gap-1">
+      {notes.map((n, i) => {
+        const def = NOTE_MAP[noteIdOf(n) ?? 'C'];
+        return (
+          <span
+            key={i}
+            className={clsx(
+              'rounded-full flex items-center justify-center font-cinzel font-bold text-black',
+              size === 'sm' ? 'w-6 h-6 text-xs' : 'w-8 h-8 text-sm',
+            )}
+            style={{ backgroundColor: def.color, boxShadow: `0 0 4px ${def.color}` }}
+          >
+            {n}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function HarmonyTokens({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="text-cyan-300 font-cinzel font-bold text-sm" title={`${count} Harmony`}>
+      {'◈'.repeat(Math.min(count, 4))}{count > 4 ? `×${count}` : ''}
+    </span>
+  );
+}
+
+// ─── Hand Card (shown in a player's hand) ────────────────────────────────────
 interface HandCardProps {
   card: AnyCard;
   isSelected?: boolean;
   isPlayable?: boolean;
   onClick?: () => void;
-  compact?: boolean;
 }
 
-export function HandCard({ card, isSelected, isPlayable, onClick, compact }: HandCardProps) {
-  const isChord = card.type === 'chord-spirit';
-  const isSpell = card.type === 'song-spell';
-  const isProg = card.type === 'chord-progression';
-
-  const cs = isChord ? card as ChordSpiritCard : null;
-  const ss = isSpell ? card as SongSpellCard : null;
-  const cp = isProg ? card as ChordProgressionCard : null;
-
-  const typeLabel = isChord ? 'Chord Spirit' : isSpell ? 'Song Spell' : 'Chord Progression';
-  const typeColor = isChord ? '#9d4edd' : isSpell ? '#0ea5e9' : '#d4af37';
-
-  const borderColor = isSelected
-    ? '#d4af37'
-    : isPlayable
-    ? '#4ade80'
-    : '#2a2a5a';
+export function HandCard({ card, isSelected, isPlayable, onClick }: HandCardProps) {
+  const isSpirit = card.type !== 'chord-spell';
+  const borderColor = isSelected ? '#d4af37' : isPlayable ? '#4ade80' : '#2a2a5a';
 
   return (
     <button
       onClick={onClick}
-      disabled={!isPlayable && !isSelected}
+      disabled={!onClick || (!isPlayable && !isSelected)}
       className={clsx(
-        'relative rounded-xl border-2 flex flex-col overflow-hidden transition-all duration-200 select-none text-left',
-        compact ? 'w-28 h-40' : 'w-36 h-52',
-        isSelected && 'scale-105 -translate-y-3',
+        'relative flex-none rounded-xl border-2 flex flex-col overflow-hidden transition-all duration-200 select-none text-left w-40 h-56',
+        isSelected && 'scale-105 -translate-y-2',
         isPlayable && !isSelected && 'hover:scale-102 hover:-translate-y-1 cursor-pointer',
-        !isPlayable && !isSelected && 'opacity-50 cursor-not-allowed',
+        !isPlayable && !isSelected && onClick && 'opacity-50 cursor-not-allowed',
       )}
       style={{
         borderColor,
@@ -52,79 +85,44 @@ export function HandCard({ card, isSelected, isPlayable, onClick, compact }: Han
     >
       {/* Header */}
       <div className="px-2 pt-1.5 pb-1 bg-black/60">
-        <div className="font-cinzel font-bold text-white leading-tight truncate" style={{ fontSize: compact ? '0.6rem' : '0.7rem' }}>
-          {card.name}
-        </div>
-        <div className="font-cinzel" style={{ fontSize: '0.5rem', color: typeColor }}>
-          {typeLabel}
-        </div>
+        <div className="font-cinzel font-bold text-white leading-tight truncate text-sm">{card.name}</div>
+        <div className="font-cinzel text-[11px]" style={{ color: TYPE_COLOR[card.type] }}>{TYPE_LABEL[card.type]}</div>
       </div>
 
-      {/* Notes required (spine) */}
-      <div className="px-1.5 py-1 bg-black/40 flex flex-wrap gap-0.5">
-        {card.type !== 'chord-progression'
-          ? card.requiredNotes.map((n, i) => (
-              <span key={i} className="text-white/80 font-cinzel font-bold" style={{ fontSize: '0.6rem' }}>
-                {n}
-              </span>
-            ))
-          : (card as ChordProgressionCard).requiredChordIds.map((id, i) => (
-              <span key={i} className="text-gold-400 font-cinzel" style={{ fontSize: '0.5rem' }}>
-                ♪
-              </span>
-            ))}
+      {/* Cost */}
+      <div className="px-2 py-1 bg-black/40 min-h-[32px] flex items-center">
+        {card.type === 'song-spirit'
+          ? <span className="font-cinzel text-gold-400 text-[11px]">Combine {card.romanNumeral}</span>
+          : <NoteCost notes={card.requiredNotes} />}
       </div>
 
       {/* Art area */}
       <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-        <div className="absolute inset-0 opacity-30" style={{ background: card.artGradient }} />
-        <span className="relative z-10 font-cinzel text-white/20 text-4xl">
-          {isChord ? '♩' : isSpell ? '♪' : '♫'}
-        </span>
-        {/* Roman numeral */}
-        <div
-          className="absolute bottom-1 right-2 font-cinzel font-bold text-white/40"
-          style={{ fontSize: compact ? '0.55rem' : '0.65rem' }}
-        >
-          {card.romanNumeral}
+        <span className="relative z-10 font-cinzel text-white/20 text-5xl">{TYPE_SYMBOL[card.type]}</span>
+        <div className="absolute bottom-0.5 right-2 font-cinzel font-bold text-white/40 text-sm">
+          {card.type !== 'song-spirit' && card.romanNumeral}
         </div>
       </div>
 
       {/* Stats / text */}
       <div className="px-2 py-1 bg-black/70">
-        {(isChord || (isProg && cp?.isMinion)) && (
-          <div className="flex gap-2 mb-0.5">
-            <span className="text-orange-400 font-cinzel font-bold" style={{ fontSize: compact ? '0.6rem' : '0.7rem' }}>
-              {(cs?.strength ?? cp?.strength ?? 0)}⚔
-            </span>
-            <span className="text-blue-400 font-cinzel font-bold" style={{ fontSize: compact ? '0.6rem' : '0.7rem' }}>
-              {(cs?.will ?? cp?.will ?? 0)}🛡
-            </span>
-          </div>
-        )}
-        <p className="text-white/60 leading-tight" style={{ fontSize: '0.5rem' }}>
-          {card.abilityText.length > (compact ? 50 : 80)
-            ? card.abilityText.slice(0, compact ? 47 : 77) + '...'
-            : card.abilityText}
-        </p>
-        {/* Keywords */}
-        {isChord && (cs?.keywords ?? []).length > 0 && (
-          <div className="flex gap-1 mt-0.5">
-            {cs!.keywords.map(k => (
-              <span key={k} className="text-gold-400 font-cinzel font-bold" style={{ fontSize: '0.45rem' }}>
-                [{k}]
-              </span>
+        {isSpirit && (
+          <div className="flex items-center gap-2">
+            <span className="text-orange-400 font-cinzel font-bold text-base">{card.power}⚔</span>
+            <HarmonyTokens count={card.harmony} />
+            {card.keywords.map(k => (
+              <span key={k} className="text-gold-400 font-cinzel text-[10px]">[{k}]</span>
             ))}
           </div>
         )}
+        {card.abilityText && (
+          <p className="text-white/60 leading-tight text-[11px] line-clamp-3">{card.abilityText}</p>
+        )}
       </div>
 
-      {/* Playable glow */}
       {isPlayable && !isSelected && (
         <div className="absolute inset-0 rounded-xl pointer-events-none border border-green-400/30 animate-pulse" />
       )}
-
-      {/* Legendary shimmer */}
       {card.rarity === 'legendary' && (
         <div className="absolute inset-0 rounded-xl pointer-events-none overflow-hidden">
           <div className="absolute inset-0 opacity-10"
@@ -135,101 +133,108 @@ export function HandCard({ card, isSelected, isPlayable, onClick, compact }: Han
   );
 }
 
-// ─── Field Spirit (on battlefield) ───────────────────────────────────────────
+// ─── Lane highlight states ───────────────────────────────────────────────────
+export type LaneHighlight = 'selected' | 'target' | 'selectable' | 'open' | null;
+
+const HIGHLIGHT_BORDER: Record<Exclude<LaneHighlight, null>, string> = {
+  selected: '#d4af37',
+  target: '#ef4444',
+  selectable: '#4ade80',
+  open: '#38bdf8',
+};
+
+// ─── Field Spirit (in a lane) ────────────────────────────────────────────────
 interface FieldSpiritCardProps {
   spirit: FieldSpirit;
-  isSelected?: boolean;
-  isAttackTarget?: boolean;
-  canSelect?: boolean;
+  power: number;             // current Power (needs the owner's board for auras)
+  highlight?: LaneHighlight;
   onClick?: () => void;
-  flipped?: boolean; // for AI side
+  isOwnersTurn?: boolean;    // "Just arrived" only matters on the owner's turn
 }
 
-export function FieldSpiritCard({ spirit, isSelected, isAttackTarget, canSelect, onClick, flipped }: FieldSpiritCardProps) {
-  const { card, currentStrength, currentWill, canChallenge, isExhausted, hasTaunt } = spirit;
-  const isChord = card.type === 'chord-spirit';
-  const cs = isChord ? card as ChordSpiritCard : card as ChordProgressionCard;
-  const keywords = isChord
-    ? (card as ChordSpiritCard).keywords ?? []
-    : (card as ChordProgressionCard).keywords ?? [];
-
-  const borderColor = isSelected
-    ? '#d4af37'
-    : isAttackTarget
-    ? '#ef4444'
-    : hasTaunt
-    ? '#22d3ee'
-    : canSelect
-    ? '#4ade80'
-    : '#2a2a5a';
+export function FieldSpiritCard({ spirit, power, highlight = null, onClick, isOwnersTurn = true }: FieldSpiritCardProps) {
+  const { card, isTapped, enteredThisTurn, harmony, attachments } = spirit;
+  const canAct = !enteredThisTurn || card.keywords.includes('Tempo');
+  const powerColor = power > card.power ? '#4ade80' : power < card.power ? '#f87171' : '#fb923c';
 
   return (
     <button
       onClick={onClick}
-      disabled={!canSelect && !isAttackTarget}
+      disabled={!onClick || !highlight}
       className={clsx(
-        'relative rounded-lg border-2 flex flex-col overflow-hidden transition-all duration-200 select-none',
-        'w-24 h-32',
-        isSelected && 'scale-105 shadow-[0_0_20px_rgba(212,175,55,0.7)]',
-        isAttackTarget && 'scale-105 shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse',
-        isExhausted && 'opacity-60',
-        flipped && 'rotate-180',
-        canSelect && !isSelected && 'hover:scale-105 cursor-pointer',
+        'relative rounded-lg border-2 flex flex-col overflow-hidden transition-all duration-200 select-none w-40 h-48 text-left',
+        highlight === 'selected' && 'scale-105 shadow-[0_0_20px_rgba(212,175,55,0.7)]',
+        highlight === 'target' && 'shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse cursor-pointer',
+        highlight === 'selectable' && 'hover:scale-105 cursor-pointer',
+        highlight === 'open' && 'cursor-pointer',
       )}
-      style={{
-        borderColor,
-        background: card.artGradient,
-        boxShadow: isSelected ? '0 0 20px rgba(212,175,55,0.6)' : undefined,
-      }}
+      style={{ borderColor: highlight ? HIGHLIGHT_BORDER[highlight] : '#2a2a5a', background: card.artGradient }}
     >
       {/* Name */}
       <div className="px-1.5 pt-1 bg-black/60">
-        <div className="font-cinzel font-bold text-white leading-tight" style={{ fontSize: '0.55rem' }}>
-          {card.name}
-        </div>
-        <div className="font-cinzel text-purple-300" style={{ fontSize: '0.45rem' }}>
-          {card.romanNumeral}
-        </div>
+        <div className="font-cinzel font-bold text-white leading-tight text-sm truncate">{card.name}</div>
+        <div className="font-cinzel text-purple-300 text-xs">{card.romanNumeral}</div>
       </div>
 
-      {/* Art */}
-      <div className="flex-1 flex items-center justify-center">
-        {card.type === 'chord-progression' ? '♫' : '♩'}/
+      {/* Art + attachments */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-1 px-1">
+        <span className="font-cinzel text-white/25 text-4xl">{card.type === 'song-spirit' ? '♫' : '♩'}</span>
+        <div className="flex flex-wrap gap-1 justify-center">
+          {attachments.map((a, i) => (
+            <span key={i} className="text-[10px] font-cinzel rounded px-1 bg-black/60 border border-cyan-400/40 text-cyan-200">
+              {a.card.name}{a.spellproof ? ' ⛨' : ''}
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Stats */}
       <div className="px-1.5 pb-1 bg-black/70 flex justify-between items-center">
-        <span className="text-orange-400 font-cinzel font-bold" style={{ fontSize: '0.65rem' }}>
-          {currentStrength}⚔
-        </span>
-        <div className="flex gap-0.5">
-          {keywords.includes('Tempo') && (
-            <span className="text-yellow-400" style={{ fontSize: '0.5rem' }}>T</span>
-          )}
-          {keywords.includes('Transfer') && (
-            <span className="text-red-400" style={{ fontSize: '0.5rem' }}>X</span>
-          )}
-          {hasTaunt && (
-            <span className="text-cyan-400" style={{ fontSize: '0.5rem' }}>◈</span>
-          )}
+        <span className="font-cinzel font-bold text-xl" style={{ color: powerColor }}>{power}⚔</span>
+        <div className="flex items-center gap-1">
+          {card.keywords.includes('Tempo') && <span className="text-yellow-400 text-[10px] font-cinzel">Tempo</span>}
+          <HarmonyTokens count={harmony + attachments.length} />
         </div>
-        <span className="text-blue-400 font-cinzel font-bold" style={{ fontSize: '0.65rem' }}>
-          {currentWill}🛡
-        </span>
       </div>
 
-      {/* Exhausted overlay */}
-      {isExhausted && (
-        <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
-          <span className="text-white/40 text-xs font-cinzel">✓</span>
+      {/* Tapped / summoning overlays */}
+      {isTapped && (
+        <div className="absolute inset-0 bg-black/55 flex items-center justify-center pointer-events-none">
+          <span className="font-cinzel text-white/60 text-xs tracking-widest rotate-[-12deg] border border-white/30 px-2 py-0.5 rounded">TAPPED</span>
         </div>
       )}
-
-      {/* Can't challenge overlay */}
-      {!canChallenge && !isExhausted && (
-        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-center" style={{ fontSize: '0.4rem' }}>
-          <span className="text-white/40 font-cinzel">Summoning</span>
+      {!isTapped && !canAct && isOwnersTurn && (
+        <div className="absolute top-12 left-0 right-0 bg-black/60 text-center pointer-events-none">
+          <span className="text-white/50 font-cinzel text-[10px]">Just arrived</span>
         </div>
+      )}
+    </button>
+  );
+}
+
+// ─── Empty lane slot ─────────────────────────────────────────────────────────
+interface EmptyLaneProps {
+  lane: number;
+  highlight?: LaneHighlight;
+  label?: string;           // shown when highlighted, e.g. "Cast here"
+  onClick?: () => void;
+}
+
+export function EmptyLane({ lane, highlight = null, label, onClick }: EmptyLaneProps) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={!onClick || !highlight}
+      className={clsx(
+        'rounded-lg border-2 border-dashed w-40 h-48 flex flex-col items-center justify-center transition-all duration-200',
+        highlight ? 'cursor-pointer bg-white/5 hover:bg-white/10' : 'bg-black/20',
+        highlight === 'target' && 'animate-pulse',
+      )}
+      style={{ borderColor: highlight ? HIGHLIGHT_BORDER[highlight] : 'rgba(255,255,255,0.08)' }}
+    >
+      <span className="font-cinzel text-white/15 text-xs tracking-widest">LANE {lane + 1}</span>
+      {highlight && label && (
+        <span className="font-cinzel text-sm mt-2" style={{ color: HIGHLIGHT_BORDER[highlight] }}>{label}</span>
       )}
     </button>
   );

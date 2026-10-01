@@ -1,11 +1,13 @@
 import type {
   ChordSpiritCard,
-  SongSpellCard,
-  ChordProgressionCard,
+  SongSpiritCard,
+  ChordSpellCard,
   MusicianCard,
   InstrumentCard,
   AnyCard,
 } from '@/types';
+
+// Card rules and stats: docs/rules.md §9 and §12
 
 // ─── Chord Spirit Cards ───────────────────────────────────────────────────────
 
@@ -14,74 +16,27 @@ export const CHORD_SPIRIT_CARDS: ChordSpiritCard[] = [
     id: 'chord-I-Cmaj',
     name: 'Tonic Guardian',
     type: 'chord-spirit',
-    key: 'C major',
     romanNumeral: 'I',
     chordName: 'C Major',
     requiredNotes: ['C', 'E', 'G'],
-    strength: 3,
-    will: 3,
-    keywords: ['Taunt'],
-    abilityText: 'Taunt. Enemy Chord Spirits must challenge Tonic Guardian first.',
+    power: 3,
+    harmony: 0,
+    keywords: [],
+    abilityText: null,
     rarity: 'common',
     artGradient: 'linear-gradient(135deg, #1a1a3e 0%, #2d4a7a 50%, #1a3a5c 100%)',
-  },
-  {
-    id: 'chord-ii-Dmin',
-    name: 'Fanfare Falcon',
-    type: 'chord-spirit',
-    key: 'C major',
-    romanNumeral: 'ii',
-    chordName: 'D Minor',
-    requiredNotes: ['D', 'F', 'A'],
-    strength: 1,
-    will: 2,
-    keywords: [],
-    abilityText: 'When Fanfare Falcon deals damage to a Chord Spirit, that spirit gets −1 will.',
-    rarity: 'common',
-    artGradient: 'linear-gradient(135deg, #2d1a4a 0%, #8B4513 40%, #d4af37 100%)',
-  },
-  {
-    id: 'chord-iii-Emin',
-    name: 'Flute Flies',
-    type: 'chord-spirit',
-    key: 'C major',
-    romanNumeral: 'iii',
-    chordName: 'E Minor',
-    requiredNotes: ['E', 'G', 'B'],
-    strength: 2,
-    will: 1,
-    keywords: [],
-    abilityText: 'Each time Flute Flies completes a challenge, it gains +1 will.',
-    rarity: 'common',
-    artGradient: 'linear-gradient(135deg, #1a3a1a 0%, #2d7a4a 50%, #8bc34a 100%)',
-  },
-  {
-    id: 'chord-IV-Fmaj',
-    name: 'Subdominant Sage',
-    type: 'chord-spirit',
-    key: 'C major',
-    romanNumeral: 'IV',
-    chordName: 'F Major',
-    requiredNotes: ['F', 'A', 'C'],
-    strength: 2,
-    will: 3,
-    keywords: [],
-    abilityText: 'When Subdominant Sage enters the field, draw 1 card from your deck.',
-    rarity: 'uncommon',
-    artGradient: 'linear-gradient(135deg, #2a1a3a 0%, #5d3a8a 50%, #9d4edd 100%)',
   },
   {
     id: 'chord-V-Gmaj',
     name: 'Dominant Dragon',
     type: 'chord-spirit',
-    key: 'C major',
     romanNumeral: 'V',
     chordName: 'G Major',
     requiredNotes: ['G', 'B', 'D'],
-    strength: 4,
-    will: 2,
+    power: 2,
+    harmony: 0,
     keywords: ['Tempo'],
-    abilityText: 'Tempo. Dominant Dragon may challenge the turn it is played.',
+    abilityText: 'Tempo. May attack the turn it is played.',
     rarity: 'uncommon',
     artGradient: 'linear-gradient(135deg, #3a1a1a 0%, #8B0000 50%, #ff4500 100%)',
   },
@@ -89,199 +44,170 @@ export const CHORD_SPIRIT_CARDS: ChordSpiritCard[] = [
     id: 'chord-vi-Amin',
     name: 'Aeolian Fox',
     type: 'chord-spirit',
-    key: 'C major',
     romanNumeral: 'vi',
     chordName: 'A Minor',
     requiredNotes: ['A', 'C', 'E'],
-    strength: 2,
-    will: 2,
+    power: 1,
+    harmony: 1,
     keywords: [],
-    abilityText: 'Whenever Aeolian Fox takes damage, restore 1 HP to your Musician.',
+    abilityText: 'Harmony. Cancels the first attack from the spirit across from it.',
     rarity: 'common',
     artGradient: 'linear-gradient(135deg, #1a2a3a 0%, #2a4a6a 50%, #00bcd4 100%)',
   },
   {
-    id: 'chord-vii-Bdim',
-    name: 'Seventh Shadow',
+    id: 'chord-IV-Fmaj',
+    name: 'Subdominant Sage',
     type: 'chord-spirit',
-    key: 'C major',
-    romanNumeral: 'vii°',
-    chordName: 'B Diminished',
-    requiredNotes: ['B', 'D', 'F'],
-    strength: 3,
-    will: 1,
-    keywords: ['Tempo'],
-    abilityText: 'Tempo. When Seventh Shadow enters, deal 1 damage to a target Chord Spirit.',
+    romanNumeral: 'IV',
+    chordName: 'F Major',
+    requiredNotes: ['F', 'A', 'C'],
+    power: 3,
+    harmony: 0,
+    keywords: [],
+    abilityText: null,
     rarity: 'uncommon',
-    artGradient: 'linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 50%, #4a0080 100%)',
-  },
-  {
-    id: 'chord-ii7-Dmin7',
-    name: 'Accidental Alligator',
-    type: 'chord-spirit',
-    key: 'C major',
-    romanNumeral: 'ii⁷',
-    chordName: 'D Minor 7th',
-    requiredNotes: ['D', 'F', 'A', 'C'],
-    strength: 5,
-    will: 3,
-    keywords: ['Transfer'],
-    abilityText: 'Transfer. Excess strength beyond the will of blockers is transferred to the blocker\'s owner.',
-    rarity: 'rare',
-    artGradient: 'linear-gradient(135deg, #1a1a0a 0%, #4a3a0a 50%, #d4af37 100%)',
+    artGradient: 'linear-gradient(135deg, #2a1a3a 0%, #5d3a8a 50%, #9d4edd 100%)',
   },
 ];
 
-// ─── Song Spell Cards ─────────────────────────────────────────────────────────
+// ─── Song Spirit Cards ────────────────────────────────────────────────────────
 
-export const SONG_SPELL_CARDS: SongSpellCard[] = [
+export const SONG_SPIRIT_CARDS: SongSpiritCard[] = [
   {
-    id: 'spell-vi-solar-flare',
-    name: 'Solar Flare',
-    type: 'song-spell',
-    key: 'C major',
-    romanNumeral: 'vi',
-    requiredNotes: ['A', 'C', 'E'],
-    effect: { kind: 'stat-buff', stat: 'strength', amount: 3, target: 'any-spirit' },
-    abilityText: 'Target Chord Spirit gains +3 strength until the end of turn.',
+    id: 'song-sun-dragon',
+    name: 'Sun Dragon',
+    type: 'song-spirit',
+    romanNumeral: 'I–V–vi–IV',
+    requiredChordIds: ['chord-I-Cmaj', 'chord-V-Gmaj', 'chord-vi-Amin', 'chord-IV-Fmaj'],
+    power: 7,
+    harmony: 3,
+    keywords: [],
+    auraPower: 1,
+    abilityText: 'Combine Tonic Guardian, Dominant Dragon, Aeolian Fox and Subdominant Sage from your board. Your other spirits get +1 Power. Once per game.',
+    rarity: 'legendary',
+    artGradient: 'linear-gradient(135deg, #0a0a0a 0%, #3a1a00 25%, #b8500c 55%, #d4af37 80%, #fff176 100%)',
+  },
+];
+
+// ─── Chord Spell Cards ────────────────────────────────────────────────────────
+// Names are placeholders.
+
+export const CHORD_SPELL_CARDS: ChordSpellCard[] = [
+  // Wave 1
+  {
+    id: 'spell-CEG-tonic-strike',
+    name: 'Tonic Strike',
+    type: 'chord-spell',
+    romanNumeral: 'I',
+    chordName: 'C Major',
+    requiredNotes: ['C', 'E', 'G'],
+    effect: { kind: 'damage', amount: 3, canTargetPlayers: false },
+    abilityText: 'Deal 3 damage to target spirit.',
+    rarity: 'common',
+    artGradient: 'linear-gradient(135deg, #1a0a00 0%, #5a2a00 50%, #e65100 80%, #ff8f00 100%)',
+  },
+  {
+    id: 'spell-GBD-crescendo',
+    name: 'Crescendo',
+    type: 'chord-spell',
+    romanNumeral: 'V',
+    chordName: 'G Major',
+    requiredNotes: ['G', 'B', 'D'],
+    effect: { kind: 'power', amount: 2 },
+    abilityText: 'Target spirit gets +2 Power until end of turn.',
     rarity: 'common',
     artGradient: 'linear-gradient(135deg, #1a0a00 0%, #7a3a00 40%, #ffa500 80%, #fff176 100%)',
   },
   {
-    id: 'spell-iii-sunny-side-down',
-    name: 'Sunny Side Down',
-    type: 'song-spell',
-    key: 'C major',
-    romanNumeral: 'iii',
-    requiredNotes: ['E', 'G', 'B'],
-    effect: { kind: 'stat-debuff', stat: 'will', amount: 3, target: 'enemy-spirit' },
-    abilityText: 'Target enemy Chord Spirit gets −3 will until the end of turn.',
+    id: 'spell-ACE-diminuendo',
+    name: 'Diminuendo',
+    type: 'chord-spell',
+    romanNumeral: 'vi',
+    chordName: 'A Minor',
+    requiredNotes: ['A', 'C', 'E'],
+    effect: { kind: 'power', amount: -2 },
+    abilityText: 'Target spirit gets −2 Power until end of turn.',
     rarity: 'common',
     artGradient: 'linear-gradient(135deg, #0a0a1a 0%, #0a1a3a 50%, #1565c0 80%, #42a5f5 100%)',
   },
   {
-    id: 'spell-I-resolve',
-    name: 'Resolve',
-    type: 'song-spell',
-    key: 'C major',
-    romanNumeral: 'I',
-    requiredNotes: ['C', 'E', 'G'],
-    effect: { kind: 'draw', amount: 2 },
-    abilityText: 'Draw 2 cards from your deck.',
+    id: 'spell-FAC-sustain',
+    name: 'Sustain',
+    type: 'chord-spell',
+    romanNumeral: 'IV',
+    chordName: 'F Major',
+    requiredNotes: ['F', 'A', 'C'],
+    effect: { kind: 'attach', power: 1, spellproof: false },
+    abilityText: 'Attach to target spirit. It gets +1 Power while attached. Counts as Harmony.',
     rarity: 'common',
+    artGradient: 'linear-gradient(135deg, #1a0a2a 0%, #4a1a6a 50%, #9c27b0 80%, #e040fb 100%)',
+  },
+  // Wave 2
+  {
+    id: 'spell-CEG-fermata',
+    name: 'Fermata',
+    type: 'chord-spell',
+    romanNumeral: 'I',
+    chordName: 'C Major',
+    requiredNotes: ['C', 'E', 'G'],
+    effect: { kind: 'counter' },
+    abilityText: 'Counter target chord spell. (Needs instant speed — not castable yet.)',
+    rarity: 'uncommon',
     artGradient: 'linear-gradient(135deg, #0a1a0a 0%, #1a4a2a 50%, #2e7d32 80%, #66bb6a 100%)',
   },
   {
-    id: 'spell-IV-fortissimo',
-    name: 'Fortissimo',
-    type: 'song-spell',
-    key: 'C major',
-    romanNumeral: 'IV',
-    requiredNotes: ['F', 'A', 'C'],
-    effect: { kind: 'stat-buff', stat: 'strength', amount: 2, target: 'all-friendly' },
-    abilityText: 'All your Chord Spirits gain +2 strength until end of turn.',
-    rarity: 'uncommon',
-    artGradient: 'linear-gradient(135deg, #1a0a2a 0%, #4a1a6a 50%, #9c27b0 80%, #e040fb 100%)',
-  },
-  {
-    id: 'spell-V-cadence',
-    name: 'Perfect Cadence',
-    type: 'song-spell',
-    key: 'C major',
+    id: 'spell-GBD-dissonance',
+    name: 'Dissonance',
+    type: 'chord-spell',
     romanNumeral: 'V',
+    chordName: 'G Major',
     requiredNotes: ['G', 'B', 'D'],
-    effect: { kind: 'damage', amount: 3, target: 'enemy-spirit' },
-    abilityText: 'Deal 3 damage to target enemy Chord Spirit.',
+    effect: { kind: 'remove-harmony' },
+    abilityText: 'Remove all Harmony from target spirit, including Harmony attachments.',
     rarity: 'uncommon',
-    artGradient: 'linear-gradient(135deg, #1a0a00 0%, #5a2a00 50%, #e65100 80%, #ff8f00 100%)',
-  },
-];
-
-// ─── Chord Progression Cards (Ultimates) ──────────────────────────────────────
-
-export const CHORD_PROGRESSION_CARDS: ChordProgressionCard[] = [
-  {
-    id: 'prog-I-IV-stallion',
-    name: "Sustainin' Stallion",
-    type: 'chord-progression',
-    key: 'C major',
-    romanNumeral: 'I–IV',
-    requiredNotes: [],
-    requiredChordIds: ['chord-I-Cmaj', 'chord-IV-Fmaj'],
-    isMinion: true,
-    strength: 4,
-    will: 4,
-    keywords: [],
-    abilityText: 'When Sustainin\' Stallion enters the field, you may search your deck for a Chord card and put it in your hand.',
-    rarity: 'rare',
-    artGradient: 'linear-gradient(135deg, #1a1a0a 0%, #3a3a00 30%, #7a6a00 60%, #d4af37 100%)',
+    artGradient: 'linear-gradient(135deg, #1a0a0a 0%, #3a0a0a 40%, #7a1a1a 70%, #c62828 100%)',
   },
   {
-    id: 'prog-I-V-vi-IV-anthem',
-    name: 'Pop Anthem',
-    type: 'chord-progression',
-    key: 'C major',
-    romanNumeral: 'I–V–vi–IV',
-    requiredNotes: [],
-    requiredChordIds: ['chord-I-Cmaj', 'chord-V-Gmaj', 'chord-vi-Amin', 'chord-IV-Fmaj'],
-    isMinion: false,
-    effect: { kind: 'stat-buff', stat: 'strength', amount: 3, target: 'all-friendly' },
-    abilityText: 'All your Chord Spirits gain +3 strength and +2 will. Draw 2 cards.',
-    rarity: 'legendary',
-    artGradient: 'linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 25%, #2a1a5e 50%, #d4af37 75%, #fff176 100%)',
+    id: 'spell-ACE-minor-ward',
+    name: 'Minor Ward',
+    type: 'chord-spell',
+    romanNumeral: 'vi',
+    chordName: 'A Minor',
+    requiredNotes: ['A', 'C', 'E'],
+    effect: { kind: 'attach', power: 0, spellproof: true },
+    abilityText: 'Attach to target spirit. It has Spellproof while attached. Counts as Harmony.',
+    rarity: 'uncommon',
+    artGradient: 'linear-gradient(135deg, #0a0a2a 0%, #1a1a5a 50%, #3a3a9a 80%, #7986cb 100%)',
   },
   {
-    id: 'prog-ii-V-I-jazz',
-    name: 'Jazz Resolution',
-    type: 'chord-progression',
-    key: 'C major',
-    romanNumeral: 'ii–V–I',
-    requiredNotes: [],
-    requiredChordIds: ['chord-ii-Dmin', 'chord-V-Gmaj', 'chord-I-Cmaj'],
-    isMinion: true,
-    strength: 6,
-    will: 5,
-    keywords: ['Tempo'],
-    abilityText: 'Tempo. When Jazz Resolution challenges a spirit, deal 2 damage to the enemy hero as well.',
-    rarity: 'rare',
-    artGradient: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 40%, #2a2a6e 70%, #6a6aee 100%)',
+    id: 'spell-FAC-forte',
+    name: 'Forte',
+    type: 'chord-spell',
+    romanNumeral: 'IV',
+    chordName: 'F Major',
+    requiredNotes: ['F', 'A', 'C'],
+    effect: { kind: 'damage', amount: 2, canTargetPlayers: true },
+    abilityText: 'Deal 2 damage to any target, including players.',
+    rarity: 'uncommon',
+    artGradient: 'linear-gradient(135deg, #1a0a00 0%, #4a1a00 40%, #b71c1c 75%, #ff5252 100%)',
   },
 ];
 
 // ─── All playable cards ───────────────────────────────────────────────────────
 export const ALL_CARDS: AnyCard[] = [
   ...CHORD_SPIRIT_CARDS,
-  ...SONG_SPELL_CARDS,
-  ...CHORD_PROGRESSION_CARDS,
+  ...SONG_SPIRIT_CARDS,
+  ...CHORD_SPELL_CARDS,
 ];
 
-// ─── Starter Deck ─────────────────────────────────────────────────────────────
+// ─── Starter Deck (45) ────────────────────────────────────────────────────────
+// 4× each chord spirit, 1× Sun Dragon, 4× each spell except Fermata (needs instant speed)
+const STARTER_SPELL_IDS = CHORD_SPELL_CARDS.filter(c => c.effect.kind !== 'counter').map(c => c.id);
+
 export const STARTER_DECK_IDS: string[] = [
-  'chord-I-Cmaj',       // x2
-  'chord-I-Cmaj',
-  'chord-ii-Dmin',      // x3
-  'chord-ii-Dmin',
-  'chord-ii-Dmin',
-  'chord-iii-Emin',     // x2
-  'chord-iii-Emin',
-  'chord-IV-Fmaj',      // x2
-  'chord-IV-Fmaj',
-  'chord-V-Gmaj',       // x2
-  'chord-V-Gmaj',
-  'chord-vi-Amin',      // x2
-  'chord-vi-Amin',
-  'chord-vii-Bdim',     // x1
-  'chord-ii7-Dmin7',    // x1
-  'spell-vi-solar-flare',    // x2
-  'spell-vi-solar-flare',
-  'spell-iii-sunny-side-down', // x2
-  'spell-iii-sunny-side-down',
-  'spell-I-resolve',    // x2
-  'spell-I-resolve',
-  'spell-IV-fortissimo', // x1
-  'spell-V-cadence',    // x1
-  'prog-I-IV-stallion', // x1
-  'prog-ii-V-I-jazz',   // x1
+  ...CHORD_SPIRIT_CARDS.flatMap(c => Array(4).fill(c.id)),
+  'song-sun-dragon',
+  ...STARTER_SPELL_IDS.flatMap(id => Array(4).fill(id)),
 ];
 
 // ─── Musicians ────────────────────────────────────────────────────────────────
@@ -293,7 +219,6 @@ export const MUSICIANS: MusicianCard[] = [
     hp: 20,
     abilityText: 'BDF VII°: Target Chord Spirit gains Tempo (it may challenge as if it were played last turn).',
     abilityType: 'active',
-    abilityEffect: undefined,
     artGradient: 'linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 30%, #4a1a6e 60%, #9d4edd 90%, #d4af37 100%)',
   },
   {
@@ -348,6 +273,16 @@ export const INSTRUMENTS: InstrumentCard[] = [
     abilityType: 'passive',
     artGradient: 'linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 50%, #444 80%, #888 100%)',
   },
+  {
+    id: 'instrument-excalibur',
+    name: 'Excalibur',
+    subtype: 'Solar Blade',
+    allowedKey: 'C major',
+    allowedNotes: ['C', 'D', 'E', 'F', 'G', 'A', 'B'],
+    abilityText: 'No ability yet.',
+    abilityType: 'passive',
+    artGradient: 'linear-gradient(135deg, #1a1000 0%, #6a4a00 40%, #d4af37 75%, #fff8c4 100%)',
+  },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -372,21 +307,5 @@ export function getStarterCollection(): Record<string, number> {
 }
 
 export function getAIDeck(): AnyCard[] {
-  // AI uses a slightly different composition of the same starter cards
-  const aiIds: string[] = [
-    'chord-I-Cmaj', 'chord-I-Cmaj',
-    'chord-ii-Dmin', 'chord-ii-Dmin',
-    'chord-iii-Emin', 'chord-iii-Emin',
-    'chord-IV-Fmaj', 'chord-IV-Fmaj',
-    'chord-V-Gmaj', 'chord-V-Gmaj', 'chord-V-Gmaj',
-    'chord-vi-Amin', 'chord-vi-Amin',
-    'chord-ii7-Dmin7',
-    'spell-vi-solar-flare', 'spell-vi-solar-flare',
-    'spell-V-cadence', 'spell-V-cadence',
-    'spell-iii-sunny-side-down',
-    'spell-I-resolve',
-    'prog-I-IV-stallion',
-    'prog-ii-V-I-jazz',
-  ];
-  return buildDeckFromIds(aiIds);
+  return buildDeckFromIds(STARTER_DECK_IDS);
 }

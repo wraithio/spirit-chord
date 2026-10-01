@@ -6,7 +6,13 @@ import { ALL_CARDS, MUSICIANS, INSTRUMENTS } from '@/data/cards';
 import type { Collection, AnyCard } from '@/types';
 import clsx from 'clsx';
 
-type FilterType = 'all' | 'chord-spirit' | 'song-spell' | 'chord-progression';
+type FilterType = 'all' | 'chord-spirit' | 'song-spirit' | 'chord-spell';
+
+const TYPE_LABEL: Record<AnyCard['type'], string> = {
+  'chord-spirit': 'Chord Spirit',
+  'song-spirit': 'Song Spirit',
+  'chord-spell': 'Chord Spell',
+};
 
 export default function CollectionPage() {
   const router = useRouter();
@@ -51,7 +57,7 @@ export default function CollectionPage() {
       {/* Filters */}
       <div className="px-8 py-4 border-b border-white/5 flex items-center gap-4 flex-wrap">
         <div className="flex gap-2">
-          {(['all', 'chord-spirit', 'song-spell', 'chord-progression'] as FilterType[]).map(f => (
+          {(['all', 'chord-spirit', 'song-spirit', 'chord-spell'] as FilterType[]).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -62,7 +68,7 @@ export default function CollectionPage() {
                   : 'border-white/10 text-white/30 hover:text-white/60 hover:border-white/20'
               )}
             >
-              {f === 'all' ? 'All' : f === 'chord-spirit' ? 'Chord Spirits' : f === 'song-spell' ? 'Song Spells' : 'Progressions'}
+              {f === 'all' ? 'All' : f === 'chord-spirit' ? 'Chord Spirits' : f === 'song-spirit' ? 'Song Spirits' : 'Chord Spells'}
             </button>
           ))}
         </div>
@@ -80,10 +86,6 @@ export default function CollectionPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
           {filtered.map(card => {
             const count = collection?.cardCounts[card.id] ?? 0;
-            const isChord = card.type === 'chord-spirit';
-            const isProg = card.type === 'chord-progression';
-            const cs = isChord ? card as import('@/types').ChordSpiritCard : null;
-            const cp = isProg ? card as import('@/types').ChordProgressionCard : null;
 
             return (
               <div
@@ -96,45 +98,47 @@ export default function CollectionPage() {
                   <div className="font-cinzel font-bold text-white leading-tight" style={{ fontSize: '0.65rem' }}>
                     {card.name}
                   </div>
-                  <div className="font-cinzel text-white/40 mt-0.5" style={{ fontSize: '0.5rem' }}>
-                    {card.type === 'chord-spirit' ? 'Chord Spirit' : card.type === 'song-spell' ? 'Song Spell' : 'Chord Progression'}
+                  <div className="font-cinzel text-white/40 mt-0.5" style={{ fontSize: '1rem' }}>
+                    {TYPE_LABEL[card.type]}
                   </div>
                 </div>
 
                 {/* Notes required */}
+
                 <div className="px-2 py-1 flex flex-wrap gap-0.5 bg-black/30">
-                  {card.requiredNotes.map((n, i) => (
-                    <span key={i} className="font-cinzel text-white/70 font-bold" style={{ fontSize: '0.6rem' }}>{n}</span>
-                  ))}
-                  {card.type === 'chord-progression' && (
-                    <span className="font-cinzel text-gold-400/60" style={{ fontSize: '0.5rem' }}>
-                      Chord Prog
+                  {card.type === 'song-spirit' ? (
+                    <span className="font-cinzel text-gold-400/60" style={{ fontSize: '1rem' }}>
+                      Combine {card.romanNumeral}
                     </span>
-                  )}
+                  ) : card.requiredNotes.map((n, i) => (
+                    <span key={i} className="font-cinzel text-white/70 font-bold" style={{ fontSize: '1.5rem' }}>{n}</span>
+                  ))}
                 </div>
 
                 {/* Art */}
                 <div className="flex-1 flex items-center justify-center py-2">
                   <span className="text-white/10 text-4xl font-cinzel">
-                    {card.type === 'song-spell' ? '♪' : card.type === 'chord-progression' ? '♫' : '♩'}
+                    {card.type === 'chord-spell' ? '♪' : card.type === 'song-spirit' ? '♫' : '♩'}
                   </span>
                 </div>
 
                 {/* Stats */}
                 <div className="px-2 pb-2 bg-black/60">
-                  {(isChord || (isProg && cp?.isMinion)) && (
+                  {card.type !== 'chord-spell' && (
                     <div className="flex gap-2 mb-1">
                       <span className="text-orange-400 font-cinzel font-bold" style={{ fontSize: '0.65rem' }}>
-                        {cs?.strength ?? cp?.strength ?? 0}⚔
+                        {card.power}⚔
                       </span>
-                      <span className="text-blue-400 font-cinzel font-bold" style={{ fontSize: '0.65rem' }}>
-                        {cs?.will ?? cp?.will ?? 0}🛡
-                      </span>
+                      {card.harmony > 0 && (
+                        <span className="text-cyan-300 font-cinzel font-bold" style={{ fontSize: '0.65rem' }}>
+                          {card.harmony} Harmony
+                        </span>
+                      )}
                     </div>
                   )}
-                  <p className="text-white/50 leading-tight" style={{ fontSize: '0.5rem' }}>
+                  { card.abilityText && (<p className="text-white/50 leading-tight" style={{ fontSize: '1rem' }}>
                     {card.abilityText.slice(0, 60)}{card.abilityText.length > 60 ? '...' : ''}
-                  </p>
+                  </p>)}
                 </div>
 
                 {/* Roman numeral */}

@@ -1,140 +1,215 @@
-import type { GameState, GameAction, NoteId } from '@/types';
-import { NOTE_SPIRITS } from './musicTheory';
-import { canAffordCard } from './gameEngine';
+import type {
+  ChordSpellCard, ChordSpiritCard, FieldSpirit, GameAction, GameState, NoteId, SpellPayment, SpellTarget,
+} from '@/types';
+import { noteIdOf } from './musicTheory';
+import { gameReducer } from './gameEngine';
+import {
+  LANE_COUNT, canAttack, castLanes, currentPower, harmonyOf, isSpellproof, songSpiritMaterials, spellPaymentOptions,
+  spellTargets, spiritsOf,
+} from './rules';
 
 // ─── AI Decision Engine ───────────────────────────────────────────────────────
-// Simple rule-based AI that:
-// 1. Plays a note that helps form a chord in hand
-// 2. Plays affordable chord spirits / spells
-// 3. Attacks optimally (target lowest-will enemy, or hero if clear path)
+// Rule-based AI. GameBoard calls getAIAction after every state change, so each decision sees
+// the live board. Priority: add notes → Sun Dragon → chord spirits → spells → move → attack → end turn.
+// Every candidate is checked against the real reducer, so the AI only ever returns legal actions.
 
-export function getAIActions(state: GameState): GameAction[] {
-  const actions: GameAction[] = [];
-  const ai = state.ai;
+const AI = 'ai' as const;
 
-  // ── Step 1: Play a note that helps form a chord in hand ──────────────────
-  if (!ai.playedNoteThisTurn) {
-    const noteAction = chooseNote(state);
-    if (noteAction) actions.push(noteAction);
-  }
-
-  // ── Step 2: Play cards from hand that are affordable ─────────────────────
-  // Sort hand: chord progressions first (most impactful), then chord spirits, then spells
-  const sortedHand = [...ai.hand].sort((a, b) => {
-    const priority: Record<string, number> = { 'chord-progression': 0, 'chord-spirit': 1, 'song-spell': 2 };
-    return priority[a.type] - priority[b.type];
-  });
-
-  for (const card of sortedHand) {
-    // Re-check affordability after each play (note field changes)
-    const currentAI = state.ai;
-    if (canAffordCard(card, currentAI.noteField, currentAI.chordField)) {
-      if (card.type === 'song-spell') {
-        // Pick best target for spell
-        const target = chooseSpellTarget(state, card.id);
-        actions.push({ type: 'PLAY_CARD', who: 'ai', cardId: card.id, targetInstanceId: target });
-      } else {
-        actions.push({ type: 'PLAY_CARD', who: 'ai', cardId: card.id });
-      }
-    }
-  }
-
-  // ── Step 3: Attack with all available spirits ─────────────────────────────
-  for (const spirit of ai.chordField) {
-    if (!spirit.canChallenge || spirit.isExhausted) continue;
-
-    const target = chooseAttackTarget(state);
-    actions.push({
-      type: 'DECLARE_ATTACK',
-      who: 'ai',
-      attackerInstanceId: spirit.instanceId,
-      targetInstanceId: target,
-    });
-  }
-
-  // ── Step 4: End turn ──────────────────────────────────────────────────────
-  actions.push({ type: 'END_TURN', who: 'ai' });
-
-  return actions;
+function isLegal(state: GameState, action: GameAction): boolean {
+  return gameReducer(state, action) !== state;
 }
 
-// ─── Choose which note to play ────────────────────────────────────────────────
+export function getAIMulligan(state: GameState): GameAction {
+  const hasSpirit = state.ai.hand.some(c => c.type === 'chord-spirit');
+  return { type: hasSpirit ? 'KEEP_HAND' : 'MULLIGAN', who: AI };
+}
+
+export function getAIAction(state: GameState): GameAction {
+  const candidates = [chooseNote, castSongSpirit, castChordSpirit, castSpell, moveSpirit, attack];
+  for (const choose of candidates) {
+    const action = choose(state);
+    if (action && isLegal(state, action)) return action;
+  }
+  return { type: 'END_TURN', who: AI };
+}
+
+// ─── Notes ────────────────────────────────────────────────────────────────────
+// Build toward one card at a time: the chord spirit (then spell) closest to castable from the
+// untapped pool. Otherwise add whatever notes the hand is missing most.
 function chooseNote(state: GameState): GameAction | null {
   const ai = state.ai;
-  const fieldNotes = ai.noteField.map(n => n.chosenNote);
+  const inReserve = (Object.keys(ai.reserve) as NoteId[]).filter(id => (ai.reserve[id] ?? 0) > 0);
+  if (ai.notesAddedThisTurn >= 3 || inReserve.length === 0) return null;
 
-  // Find notes needed to complete any card in hand
-  const neededNotes: string[] = [];
+  const missingFor = (notes: string[]): NoteId[] => {
+    const available = { ...ai.pool };
+    const missing: NoteId[] = [];
+    for (const note of notes) {
+      const id = noteIdOf(note);
+      if (!id) continue;
+      if ((available[id] ?? 0) > 0) available[id] = available[id]! - 1;
+      else missing.push(id);
+    }
+    return missing;
+  };
+  const goals = ai.hand
+    .filter((c): c is ChordSpiritCard | ChordSpellCard => c.type !== 'song-spirit')
+    .map(c => ({ card: c, missing: missingFor(c.requiredNotes) }))
+    .filter(g => g.missing.length > 0 && g.missing.every(id => (ai.reserve[id] ?? 0) > 0))
+    .sort((a, b) => a.missing.length - b.missing.length
+      || (a.card.type === 'chord-spirit' ? -1 : 0) - (b.card.type === 'chord-spirit' ? -1 : 0));
+  if (goals[0]) return { type: 'ADD_NOTE', who: AI, noteId: goals[0].missing[0] };
+
+  const owned = (id: NoteId) => (ai.pool[id] ?? 0) + (ai.tappedPool[id] ?? 0);
+  const need: Partial<Record<NoteId, number>> = {};
   for (const card of ai.hand) {
-    if (card.type === 'chord-spirit' || card.type === 'song-spell') {
-      for (const req of card.requiredNotes) {
-        if (!fieldNotes.includes(req)) {
-          neededNotes.push(req);
-        }
-      }
+    if (card.type === 'song-spirit') continue;
+    const weight = card.type === 'chord-spirit' ? 3 : 1;
+    for (const note of card.requiredNotes) {
+      const id = noteIdOf(note);
+      if (id && owned(id) < 2) need[id] = (need[id] ?? 0) + weight;
     }
   }
+  const ranked = [...inReserve].sort((a, b) => (need[b] ?? 0) - (need[a] ?? 0) || owned(a) - owned(b));
+  return { type: 'ADD_NOTE', who: AI, noteId: ranked[0] };
+}
 
-  // Pick most needed note
-  if (neededNotes.length > 0) {
-    const freq: Record<string, number> = {};
-    for (const n of neededNotes) freq[n] = (freq[n] ?? 0) + 1;
-    const best = Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+// ─── Spirits ──────────────────────────────────────────────────────────────────
+// How good a lane is for a spirit of this Power (higher is better)
+function laneScore(state: GameState, lane: number, power: number, harmony: number): number {
+  const enemy = state.player.lanes[lane];
+  if (!enemy) return 3;                       // open lane: hits the player
+  if (harmonyOf(enemy) > 0) return 1;         // can strip Harmony for free
+  const enemyPower = currentPower(state.player, enemy);
+  if (power > enemyPower) return 4;           // wins the clash
+  if (power === enemyPower) return 1;         // trade
+  return harmony > 0 ? 2 : -1;                // loses, unless we have Harmony to absorb it
+}
 
-    // Find note spirit ID for this note
-    const noteDef = NOTE_SPIRITS.find(n => n.primaryNote === best || n.altNote === best);
-    if (noteDef) {
-      return { type: 'PLAY_NOTE', who: 'ai', noteId: noteDef.id as NoteId, chosenNote: best };
-    }
+function bestLane(state: GameState, lanes: number[], power: number, harmony: number): number {
+  return [...lanes].sort((a, b) => laneScore(state, b, power, harmony) - laneScore(state, a, power, harmony))[0];
+}
+
+function castSongSpirit(state: GameState): GameAction | null {
+  for (const card of state.ai.hand) {
+    if (card.type !== 'song-spirit') continue;
+    const lanes = castLanes(state, AI, card);
+    if (lanes.length > 0) return { type: 'CAST_SPIRIT', who: AI, cardId: card.id, lane: bestLane(state, lanes, card.power, card.harmony) };
   }
-
-  // Fallback: play a random note not on field
-  const available = NOTE_SPIRITS.filter(n => !fieldNotes.includes(n.primaryNote));
-  if (available.length > 0) {
-    const pick = available[Math.floor(Math.random() * available.length)];
-    return { type: 'PLAY_NOTE', who: 'ai', noteId: pick.id as NoteId, chosenNote: pick.primaryNote };
-  }
-
   return null;
 }
 
-// ─── Choose attack target ─────────────────────────────────────────────────────
-function chooseAttackTarget(state: GameState): string | 'hero' {
-  const playerField = state.player.chordField;
+function castChordSpirit(state: GameState): GameAction | null {
+  const onBoard = new Set(spiritsOf(state.ai).map(sp => sp.card.id));
+  const ownsSongSpirit = state.ai.hand.some(c => c.type === 'song-spirit') && !state.ai.songSpiritCast;
+  const value = (c: ChordSpiritCard) =>
+    c.power + 2 * c.harmony + (c.keywords.includes('Tempo') ? 1 : 0) + (ownsSongSpirit && !onBoard.has(c.id) ? 3 : 0);
 
-  // Must attack taunts first
-  const taunts = playerField.filter(s => s.hasTaunt);
-  if (taunts.length > 0) {
-    return taunts[0].instanceId;
-  }
-
-  // If player has no spirits, go face
-  if (playerField.length === 0) return 'hero';
-
-  // Otherwise kill weakest spirit (lowest will)
-  const weakest = playerField.reduce((a, b) => a.currentWill < b.currentWill ? a : b);
-  return weakest.instanceId;
+  const castable = state.ai.hand
+    .filter((c): c is ChordSpiritCard => c.type === 'chord-spirit' && castLanes(state, AI, c).length > 0)
+    .sort((a, b) => value(b) - value(a));
+  const card = castable[0];
+  if (!card) return null;
+  return { type: 'CAST_SPIRIT', who: AI, cardId: card.id, lane: bestLane(state, castLanes(state, AI, card), card.power, card.harmony) };
 }
 
-// ─── Choose spell target ──────────────────────────────────────────────────────
-function chooseSpellTarget(state: GameState, cardId: string): string | undefined {
-  const playerField = state.player.chordField;
-  const aiField = state.ai.chordField;
+// ─── Spells ───────────────────────────────────────────────────────────────────
+// Pay with notes when possible; otherwise only tap a spirit that couldn't attack this turn anyway
+function choosePayment(state: GameState, card: ChordSpellCard): SpellPayment | null {
+  const options = spellPaymentOptions(state, AI, card);
+  const notes = options.find(p => p.kind === 'notes');
+  if (notes) return notes;
+  return options.find(p => {
+    if (p.kind !== 'spirit') return false;
+    const sp = spiritsOf(state.ai).find(s => s.instanceId === p.instanceId);
+    return sp !== undefined && !canAttack(state, AI, sp);
+  }) ?? null;
+}
 
-  // Sunny Side Down → debuff strongest enemy
-  if (cardId === 'spell-iii-sunny-side-down' && playerField.length > 0) {
-    return playerField.reduce((a, b) => a.currentStrength > b.currentStrength ? a : b).instanceId;
+const asTarget = (sp: FieldSpirit): SpellTarget => ({ kind: 'spirit', instanceId: sp.instanceId });
+
+function chooseSpellTarget(state: GameState, card: ChordSpellCard): SpellTarget | null {
+  const legal = spellTargets(state, card);
+  const targetable = (sp: FieldSpirit) => legal.some(t => t.kind === 'spirit' && t.instanceId === sp.instanceId);
+  const enemies = spiritsOf(state.player).filter(targetable);
+  const mine = spiritsOf(state.ai).filter(targetable);
+  const enemyPower = (sp: FieldSpirit) => currentPower(state.player, sp);
+  const myPower = (sp: FieldSpirit) => currentPower(state.ai, sp);
+  const strongestFirst = (list: FieldSpirit[], power: (sp: FieldSpirit) => number) => [...list].sort((a, b) => power(b) - power(a));
+  const effect = card.effect;
+
+  switch (effect.kind) {
+    case 'damage': {
+      const killable = strongestFirst(enemies.filter(sp => enemyPower(sp) <= effect.amount), enemyPower)[0];
+      if (killable) return asTarget(killable);
+      return effect.canTargetPlayers ? { kind: 'player', side: 'player' } : null;
+    }
+    case 'power': {
+      if (effect.amount < 0) {
+        const killable = strongestFirst(enemies.filter(sp => enemyPower(sp) <= -effect.amount), enemyPower)[0];
+        return killable ? asTarget(killable) : null;
+      }
+      // Pump an attacker so it wins a clash it would otherwise lose or trade
+      const attacker = mine.find(sp => {
+        const enemy = state.player.lanes[state.ai.lanes.indexOf(sp)];
+        if (!canAttack(state, AI, sp) || !enemy || harmonyOf(enemy) > 0) return false;
+        return myPower(sp) <= enemyPower(enemy) && myPower(sp) + effect.amount > enemyPower(enemy);
+      });
+      return attacker ? asTarget(attacker) : null;
+    }
+    case 'attach': {
+      // Protect our strongest spirit that has nothing protecting it yet
+      const unprotected = mine.filter(sp => harmonyOf(sp) === 0 && !(effect.spellproof && isSpellproof(sp)));
+      const best = strongestFirst(unprotected, myPower)[0];
+      return best ? asTarget(best) : null;
+    }
+    case 'remove-harmony': {
+      // Strip Harmony from an enemy that one of our ready attackers is facing
+      const blocked = enemies.find(sp => {
+        const facing = state.ai.lanes[state.player.lanes.indexOf(sp)];
+        return harmonyOf(sp) > 0 && facing !== null && canAttack(state, AI, facing);
+      });
+      return blocked ? asTarget(blocked) : null;
+    }
+    case 'counter':
+      return null;
   }
+}
 
-  // Solar Flare → buff weakest AI spirit (most likely to be in combat)
-  if (cardId === 'spell-vi-solar-flare' && aiField.length > 0) {
-    return aiField.reduce((a, b) => a.currentStrength < b.currentStrength ? a : b).instanceId;
+function castSpell(state: GameState): GameAction | null {
+  for (const card of state.ai.hand) {
+    if (card.type !== 'chord-spell') continue;
+    const payment = choosePayment(state, card);
+    const target = payment && chooseSpellTarget(state, card);
+    if (payment && target) return { type: 'CAST_SPELL', who: AI, cardId: card.id, target, payment };
   }
+  return null;
+}
 
-  // Perfect Cadence → destroy weakest enemy
-  if (cardId === 'spell-V-cadence' && playerField.length > 0) {
-    return playerField.reduce((a, b) => a.currentWill < b.currentWill ? a : b).instanceId;
+// ─── Movement & attacks ───────────────────────────────────────────────────────
+function moveSpirit(state: GameState): GameAction | null {
+  if (state.ai.movedThisTurn) return null;
+  const emptyLanes = [...Array(LANE_COUNT).keys()].filter(l => state.ai.lanes[l] === null);
+  for (const sp of spiritsOf(state.ai)) {
+    if (!canAttack(state, AI, sp)) continue;
+    const power = currentPower(state.ai, sp);
+    const here = laneScore(state, state.ai.lanes.indexOf(sp), power, 0);
+    const target = emptyLanes.find(l => laneScore(state, l, power, 0) > Math.max(here, 1));
+    if (target !== undefined) return { type: 'MOVE_SPIRIT', who: AI, instanceId: sp.instanceId, lane: target };
   }
+  return null;
+}
 
-  return undefined;
+function attack(state: GameState): GameAction | null {
+  for (const sp of spiritsOf(state.ai)) {
+    if (!canAttack(state, AI, sp)) continue;
+    const enemy = state.player.lanes[state.ai.lanes.indexOf(sp)];
+    const worthIt = !enemy                                                   // open lane: hit the player
+      || harmonyOf(enemy) > 0                                                // strip Harmony for free
+      || currentPower(state.ai, sp) > currentPower(state.player, enemy)       // win the clash
+      || (currentPower(state.ai, sp) === currentPower(state.player, enemy)    // even trade
+        && enemy.card.power >= sp.card.power && sp.card.type !== 'song-spirit');
+    if (worthIt) return { type: 'ATTACK', who: AI, instanceId: sp.instanceId };
+  }
+  return null;
 }

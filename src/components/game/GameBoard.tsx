@@ -1,94 +1,123 @@
-'use client';
-import { useReducer, useEffect, useCallback, useRef } from 'react';
-import type { GameState, NoteId, NoteOnField } from '@/types';
-import { gameReducer, createInitialState } from '@/lib/gameEngine';
-import { getAIActions } from '@/lib/aiOpponent';
-import { NOTE_SPIRITS, NOTE_MAP } from '@/lib/musicTheory';
+"use client";
+import { useReducer, useEffect, useRef, useState } from "react";
+import clsx from "clsx";
+import type {
+  AnyCard, FieldSpirit, GameAction, GameState, InstrumentCard, MusicianCard, NoteId, PlayerState, Side, SpellTarget,
+} from "@/types";
+import { gameReducer, createInitialState } from "@/lib/gameEngine";
+import { getAIAction, getAIMulligan } from "@/lib/aiOpponent";
+import { NOTE_MAP, noteIdOf } from "@/lib/musicTheory";
 import {
-  playNote, playChord, playChordProgression, playVictoryFanfare,
-  playDefeatSound, playCardPlace, resumeAudioContext,
-} from '@/lib/audioEngine';
-import { MUSICIANS, INSTRUMENTS, getStarterDeck, getAIDeck } from '@/data/cards';
-import NoteCard from '@/components/cards/NoteCard';
-import { HandCard, FieldSpiritCard } from '@/components/cards/ChordCard';
-import { canAffordCard } from '@/lib/gameEngine';
-import type { MusicianCard, InstrumentCard, AnyCard, ChordSpiritCard, ChordProgressionCard } from '@/types';
-import clsx from 'clsx';
+  LANE_COUNT, NOTES_PER_TURN, canAddNote, canAttack, canMove, canPlayCard, castLanes, currentPower, laneOf,
+  sameTarget, spellPaymentOptions, spellTargets, totalNotes,
+} from "@/lib/rules";
+import {
+  playNote,
+  playChord,
+  playChordProgression,
+  playVictoryFanfare,
+  playDefeatSound,
+  playCardPlace,
+  resumeAudioContext,
+} from "@/lib/audioEngine";
+import { MUSICIANS, INSTRUMENTS, getAIDeck, getCardById } from "@/data/cards";
+import NoteCard from "@/components/cards/NoteCard";
+import { HandCard, FieldSpiritCard, EmptyLane, NoteCost, type LaneHighlight } from "@/components/cards/ChordCard";
+import SelectNoteCard from "../cards/SelectNoteCard";
+
+// ─── Sounds for an action (player or AI), looked up before it's applied ──────
+function playActionSound(action: GameAction, state: GameState) {
+  switch (action.type) {
+    case "ADD_NOTE":
+      playNote(action.noteId);
+      break;
+    case "CAST_SPIRIT": {
+      const card = getCardById(action.cardId);
+      playCardPlace();
+      if (card?.type === "chord-spirit") setTimeout(() => playChord(card.requiredNotes, true), 200);
+      if (card?.type === "song-spirit") {
+        const chords = card.requiredChordIds
+          .map((id) => getCardById(id))
+          .map((c) => (c && c.type === "chord-spirit" ? c.requiredNotes : []));
+        setTimeout(() => playChordProgression(chords), 200);
+      }
+      break;
+    }
+    case "CAST_SPELL": {
+      const card = state[action.who].hand.find((c) => c.id === action.cardId);
+      if (card?.type === "chord-spell") playChord(card.requiredNotes);
+      break;
+    }
+    case "ATTACK":
+    case "MOVE_SPIRIT":
+      playCardPlace();
+      break;
+  }
+}
 
 // ─── Hero Zone ────────────────────────────────────────────────────────────────
 function HeroZone({
-  musician, hp, maxHp, isTarget, onClick, side,
+  player,
+  isTarget,
+  onClick,
 }: {
-  musician: MusicianCard;
-  hp: number; maxHp: number;
-  isTarget?: boolean; onClick?: () => void; side: 'player' | 'ai';
+  player: PlayerState;
+  isTarget?: boolean;
+  onClick?: () => void;
 }) {
+  const { musician, instrument, hp, maxHp } = player;
   const pct = Math.max(0, (hp / maxHp) * 100);
-  const hpColor = pct > 50 ? '#4ade80' : pct > 25 ? '#facc15' : '#ef4444';
+  const hpColor = pct > 50 ? "#4ade80" : pct > 25 ? "#facc15" : "#ef4444";
 
   return (
     <button
       onClick={onClick}
       disabled={!isTarget}
       className={clsx(
-        'relative rounded-xl border-2 flex flex-col items-center justify-center p-3 transition-all duration-200 min-w-[120px]',
-        isTarget && 'animate-pulse cursor-pointer border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.7)]',
-        !isTarget && 'border-white/10 cursor-default',
+        "relative flex-none rounded-xl border-2 flex flex-col justify-center px-4 py-2 transition-all duration-200 w-64 text-left",
+        isTarget && "animate-pulse cursor-pointer border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.7)]",
+        !isTarget && "border-white/10 cursor-default",
       )}
-      style={{ background: musician.artGradient, minHeight: '90px' }}
+      style={{ background: musician.artGradient }}
     >
-      <div className="font-cinzel font-bold text-white text-sm leading-tight text-center">
-        {musician.name}
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="font-cinzel font-bold text-white text-lg leading-tight truncate">{musician.name}</div>
+        <div className="font-cinzel font-bold text-lg flex-none" style={{ color: hpColor }}>
+          ♥ {Math.max(0, hp)}/{maxHp}
+        </div>
       </div>
-      <div className="font-cinzel text-white/50 text-xs mb-2">{musician.subtitle}</div>
-
-      {/* HP Bar */}
-      <div className="w-full bg-black/50 rounded-full h-2 mb-1">
+      <div className="font-cinzel text-white/50 text-xs mb-1.5 truncate">
+        {musician.subtitle} · {instrument.name} ({instrument.allowedKey})
+      </div>
+      <div className="w-full bg-black/50 rounded-full h-1.5">
         <div
-          className="h-2 rounded-full transition-all duration-500"
+          className="h-1.5 rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, backgroundColor: hpColor, boxShadow: `0 0 6px ${hpColor}` }}
         />
       </div>
-      <div className="font-cinzel font-bold" style={{ color: hpColor, fontSize: '0.75rem' }}>
-        ♥ {Math.max(0, hp)}/{maxHp}
-      </div>
-
-      {isTarget && (
-        <div className="absolute inset-0 rounded-xl border-2 border-red-400 pointer-events-none animate-pulse" />
-      )}
     </button>
   );
 }
 
-// ─── Note Field Row ───────────────────────────────────────────────────────────
-function NoteFieldRow({ notes, label }: { notes: NoteOnField[]; label: string }) {
-  if (notes.length === 0) return (
-    <div className="h-8 flex items-center justify-center">
-      <span className="text-white/20 font-cinzel text-xs italic">{label}</span>
+// ─── Note pool (one chip per note in the instrument's scale) ─────────────────
+function NotePool({ player }: { player: PlayerState }) {
+  const scale = player.instrument.allowedNotes.map(noteIdOf).filter((id): id is NoteId => !!id);
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {scale.map((id) => (
+        <NoteCard key={id} note={NOTE_MAP[id]} untapped={player.pool[id] ?? 0} tapped={player.tappedPool[id] ?? 0} />
+      ))}
+      <span className="font-cinzel text-white/30 text-xs ml-1">Reserve: {totalNotes(player.reserve)}</span>
     </div>
   );
+}
 
+function PileCounts({ player }: { player: PlayerState }) {
   return (
-    <div className="flex gap-2 items-center flex-wrap justify-center py-1">
-      {notes.map(n => {
-        const def = NOTE_MAP[n.noteId];
-        return (
-          <div
-            key={n.instanceId}
-            className="w-8 h-8 rounded-md border flex items-center justify-center font-cinzel font-bold"
-            style={{
-              borderColor: def?.color ?? '#fff',
-              color: def?.color ?? '#fff',
-              background: 'rgba(0,0,0,0.5)',
-              fontSize: '0.6rem',
-              boxShadow: `0 0 6px ${def?.color ?? '#fff'}40`,
-            }}
-            title={n.chosenNote}
-          >
-            {n.chosenNote}
-          </div>
-        );
-      })}
+    <div className="font-cinzel text-white/35 text-xs leading-relaxed">
+      <div>Hand {player.hand.length}</div>
+      <div>Deck {player.deck.length}</div>
+      <div>Discard {player.graveyard.length}</div>
     </div>
   );
 }
@@ -103,11 +132,10 @@ function GameLog({ logs }: { logs: string[] }) {
   return (
     <div
       ref={ref}
-      className="h-28 overflow-y-auto border border-white/10 rounded-lg p-2 bg-black/40 font-cinzel"
-      style={{ fontSize: '0.6rem' }}
+      className="h-full overflow-y-auto border border-white/10 rounded-lg p-2 bg-black/40 font-cinzel text-sm"
     >
       {logs.map((l, i) => (
-        <div key={i} className="text-white/60 leading-relaxed">
+        <div key={i} className={clsx("leading-relaxed", l.startsWith("---") ? "text-gold-400/70 mt-1" : "text-white/60")}>
           <span className="text-gold-400/50">›</span> {l}
         </div>
       ))}
@@ -120,401 +148,450 @@ interface Props {
   playerMusician: MusicianCard;
   playerInstrument: InstrumentCard;
   playerDeck: AnyCard[];
-  onGameOver?: (winner: 'player' | 'ai') => void;
+  onGameOver?: (winner: Side) => void;
 }
 
-export default function GameBoard({ playerMusician, playerInstrument, playerDeck, onGameOver }: Props) {
-  const aiMusician = MUSICIANS[1]; // The Resonant
-  const aiInstrument = INSTRUMENTS[0]; // Southern Belle
-  const aiDeck = getAIDeck();
-
-  const [state, dispatch] = useReducer(
-    gameReducer,
-    undefined,
-    () => createInitialState(playerMusician, playerInstrument, playerDeck, aiMusician, aiInstrument, aiDeck)
+export default function GameBoard({
+  playerMusician,
+  playerInstrument,
+  playerDeck,
+  onGameOver,
+}: Props) {
+  const [state, dispatch] = useReducer(gameReducer, undefined, () =>
+    createInitialState(
+      playerMusician,
+      playerInstrument,
+      playerDeck,
+      MUSICIANS[1], // The Resonant
+      INSTRUMENTS[0], // Southern Belle
+      getAIDeck(),
+    ),
   );
+  const [notePickerOpen, setNotePickerOpen] = useState(false);
+  const [paymentIndex, setPaymentIndex] = useState(0);
 
-  const isPlayerTurn = state.currentPlayer === 'player';
-  const aiRunning = useRef(false);
+  const me = state.player;
+  const ai = state.ai;
+  const isPlayerTurn = state.phase === "playing" && state.currentPlayer === "player";
 
-  // ── AI turn execution ─────────────────────────────────────────────────────
+  const act = (action: GameAction) => {
+    resumeAudioContext();
+    playActionSound(action, state);
+    dispatch(action);
+  };
+
+  // ── AI: mulligan, then one action at a time from the live state ───────────
+  const aiSteps = useRef(0);
   useEffect(() => {
-    if (state.currentPlayer !== 'ai' || state.phase === 'game-over' || aiRunning.current) return;
-    aiRunning.current = true;
-
-    const actions = getAIActions(state);
-    let delay = 600;
-
+    if (state.phase === "mulligan" && !state.ai.mulliganDone) {
+      dispatch(getAIMulligan(state));
+      return;
+    }
+    if (state.phase !== "playing" || state.currentPlayer !== "ai") {
+      aiSteps.current = 0;
+      return;
+    }
     const timer = setTimeout(() => {
-      actions.forEach((action, i) => {
-        setTimeout(() => {
-          dispatch(action);
-          // Play sounds for AI actions
-          if (action.type === 'PLAY_NOTE') {
-            playNote(action.noteId as NoteId);
-          }
-          if (action.type === 'PLAY_CARD') {
-            playCardPlace();
-          }
-          if (i === actions.length - 1) {
-            aiRunning.current = false;
-          }
-        }, i * 700);
-      });
-    }, delay);
-
-    return () => clearTimeout(timer);
-  }, [state.currentPlayer, state.phase]);
+      const action: GameAction =
+        ++aiSteps.current > 60 ? { type: "END_TURN", who: "ai" } : getAIAction(state);
+      playActionSound(action, state);
+      dispatch(action);
+    }, 650);
+    // The AI only picks legal actions, but if one ever changed nothing this effect wouldn't re-run: end its turn
+    const watchdog = setTimeout(() => dispatch({ type: "END_TURN", who: "ai" }), 4000);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(watchdog);
+    };
+  }, [state]);
 
   // ── Game over ─────────────────────────────────────────────────────────────
+  const reported = useRef(false);
   useEffect(() => {
-    if (state.phase === 'game-over' && state.winner) {
-      if (state.winner === 'player') playVictoryFanfare();
+    if (state.phase === "game-over" && state.winner && !reported.current) {
+      reported.current = true;
+      if (state.winner === "player") playVictoryFanfare();
       else playDefeatSound();
       onGameOver?.(state.winner);
     }
   }, [state.phase, state.winner]);
 
+  // ── Current selection ─────────────────────────────────────────────────────
+  const selectedCard = state.selectedHandIndex !== null ? me.hand[state.selectedHandIndex] ?? null : null;
+  const selectedSpell = selectedCard?.type === "chord-spell" ? selectedCard : null;
+  const payments = selectedSpell ? spellPaymentOptions(state, "player", selectedSpell) : [];
+  const payment = payments[Math.min(paymentIndex, payments.length - 1)] ?? null;
+  const targets = selectedSpell ? spellTargets(state, selectedSpell) : [];
+  const isTarget = (t: SpellTarget) => targets.some((x) => sameTarget(x, t));
+  const castableLanes = selectedCard && selectedCard.type !== "chord-spell" ? castLanes(state, "player", selectedCard) : [];
+
+  const selectedSpirit = state.selectedSpiritId
+    ? me.lanes.find((sp) => sp?.instanceId === state.selectedSpiritId) ?? null
+    : null;
+  const selectedLane = selectedSpirit ? laneOf(me, selectedSpirit.instanceId) : -1;
+  const selectedCanAttack = selectedSpirit ? canAttack(state, "player", selectedSpirit) : false;
+  const canMoveSomewhere = (sp: FieldSpirit) =>
+    [...Array(LANE_COUNT).keys()].some((l) => canMove(state, "player", sp, l));
+
   // ── Interaction handlers ──────────────────────────────────────────────────
-  const handleNoteClick = useCallback((noteId: NoteId) => {
-    resumeAudioContext();
-    if (!isPlayerTurn || state.player.playedNoteThisTurn) return;
+  const castSpellAt = (target: SpellTarget) => {
+    if (!selectedSpell || !payment || !isTarget(target)) return;
+    act({ type: "CAST_SPELL", who: "player", cardId: selectedSpell.id, target, payment });
+  };
 
-    const noteDef = NOTE_MAP[noteId];
-    if (!noteDef) return;
-
-    // Choose primary note by default (could show modal for enharmonic choice)
-    const chosenNote = noteDef.primaryNote;
-    playNote(noteId);
-    dispatch({ type: 'PLAY_NOTE', who: 'player', noteId, chosenNote });
-  }, [isPlayerTurn, state.player.playedNoteThisTurn]);
-
-  const handleHandCardClick = useCallback((cardId: string) => {
+  const handleHandClick = (index: number) => {
     resumeAudioContext();
     if (!isPlayerTurn) return;
-
-    if (state.selectedHandCardId === cardId) {
-      dispatch({ type: 'SELECT_HAND_CARD', cardId: null });
+    if (state.selectedHandIndex === index) {
+      dispatch({ type: "SELECT_HAND_CARD", index: null });
       return;
     }
-
-    const card = state.player.hand.find(c => c.id === cardId);
-    if (!card) return;
-
-    const affordable = canAffordCard(card, state.player.noteField, state.player.chordField);
-    if (!affordable) return;
-
-    // Spells that need a target — select first, then pick target
-    if (card.type === 'song-spell' && ['any-spirit', 'enemy-spirit', 'friendly-spirit'].includes(
-      (card as import('@/types').SongSpellCard).effect.target ?? ''
-    )) {
-      dispatch({ type: 'SELECT_HAND_CARD', cardId });
-      return;
+    if (canPlayCard(state, "player", me.hand[index])) {
+      setPaymentIndex(0);
+      dispatch({ type: "SELECT_HAND_CARD", index });
     }
+  };
 
-    // No target needed — play immediately
-    playCardPlace();
-    if (card.type === 'chord-spirit') {
-      const notes = (card as ChordSpiritCard).requiredNotes;
-      setTimeout(() => playChord(notes, true), 200);
-    }
-    if (card.type === 'chord-progression') {
-      const prog = card as ChordProgressionCard;
-      // Build progression notes from required chord IDs
-      const chordNotes = state.player.chordField
-        .filter(s => prog.requiredChordIds.includes(s.card.id))
-        .map(s => (s.card as ChordSpiritCard).requiredNotes ?? []);
-      if (chordNotes.length > 0) setTimeout(() => playChordProgression(chordNotes), 200);
-    }
-    dispatch({ type: 'PLAY_CARD', who: 'player', cardId });
-  }, [isPlayerTurn, state.selectedHandCardId, state.player, state.player.chordField]);
-
-  const handleFieldSpiritClick = useCallback((instanceId: string, side: 'player' | 'ai') => {
+  const handleMyLaneClick = (lane: number) => {
     resumeAudioContext();
     if (!isPlayerTurn) return;
-
-    const { selectedAttackerInstanceId, selectedHandCardId } = state;
-
-    // If a spell is selected, use this spirit as target
-    if (selectedHandCardId) {
-      playCardPlace();
-      dispatch({ type: 'PLAY_CARD', who: 'player', cardId: selectedHandCardId, targetInstanceId: instanceId });
-      dispatch({ type: 'SELECT_HAND_CARD', cardId: null });
+    const sp = me.lanes[lane];
+    if (selectedCard && selectedCard.type !== "chord-spell" && castableLanes.includes(lane)) {
+      act({ type: "CAST_SPIRIT", who: "player", cardId: selectedCard.id, lane });
       return;
     }
-
-    // Attack declaration
-    if (selectedAttackerInstanceId && side === 'ai') {
-      dispatch({ type: 'DECLARE_ATTACK', who: 'player', attackerInstanceId: selectedAttackerInstanceId, targetInstanceId: instanceId });
-      dispatch({ type: 'SELECT_ATTACKER', instanceId: null });
+    if (selectedSpell) {
+      if (sp) castSpellAt({ kind: "spirit", instanceId: sp.instanceId });
       return;
     }
-
-    // Select own spirit as attacker
-    if (side === 'player') {
-      const spirit = state.player.chordField.find(s => s.instanceId === instanceId);
-      if (spirit?.canChallenge && !spirit.isExhausted) {
-        dispatch({ type: 'SELECT_ATTACKER', instanceId: selectedAttackerInstanceId === instanceId ? null : instanceId });
-      }
+    if (selectedSpirit && !sp && canMove(state, "player", selectedSpirit, lane)) {
+      act({ type: "MOVE_SPIRIT", who: "player", instanceId: selectedSpirit.instanceId, lane });
+      return;
     }
-  }, [isPlayerTurn, state.selectedAttackerInstanceId, state.selectedHandCardId, state.player.chordField]);
+    if (sp) {
+      dispatch({ type: "SELECT_SPIRIT", instanceId: sp.instanceId === state.selectedSpiritId ? null : sp.instanceId });
+    }
+  };
 
-  const handleHeroClick = useCallback(() => {
+  const handleEnemyLaneClick = (lane: number) => {
     resumeAudioContext();
-    if (!isPlayerTurn || !state.selectedAttackerInstanceId) return;
-
-    // Check for taunts
-    const aiTaunts = state.ai.chordField.filter(s => s.hasTaunt);
-    if (aiTaunts.length > 0) return; // must attack taunts first
-
-    dispatch({ type: 'DECLARE_ATTACK', who: 'player', attackerInstanceId: state.selectedAttackerInstanceId, targetInstanceId: 'hero' });
-    dispatch({ type: 'SELECT_ATTACKER', instanceId: null });
-  }, [isPlayerTurn, state.selectedAttackerInstanceId, state.ai.chordField]);
-
-  const handleEndTurn = useCallback(() => {
     if (!isPlayerTurn) return;
-    dispatch({ type: 'END_TURN', who: 'player' });
-    dispatch({ type: 'SELECT_ATTACKER', instanceId: null });
-    dispatch({ type: 'SELECT_HAND_CARD', cardId: null });
-  }, [isPlayerTurn]);
+    const sp = ai.lanes[lane];
+    if (selectedSpell) {
+      if (sp) castSpellAt({ kind: "spirit", instanceId: sp.instanceId });
+      return;
+    }
+    if (selectedSpirit && selectedCanAttack && lane === selectedLane) {
+      act({ type: "ATTACK", who: "player", instanceId: selectedSpirit.instanceId });
+    }
+  };
 
-  const hasTauntOnAI = state.ai.chordField.some(s => s.hasTaunt);
-  const canAttackHero = !!state.selectedAttackerInstanceId && !hasTauntOnAI;
+  const handleHeroClick = (side: Side) => {
+    resumeAudioContext();
+    if (!isPlayerTurn) return;
+    if (selectedSpell) {
+      castSpellAt({ kind: "player", side });
+      return;
+    }
+    if (side === "ai" && selectedSpirit && selectedCanAttack && ai.lanes[selectedLane] === null) {
+      act({ type: "ATTACK", who: "player", instanceId: selectedSpirit.instanceId });
+    }
+  };
+
+  const handleAddNote = (noteId: NoteId) => {
+    if (!canAddNote(state, "player", noteId)) return;
+    act({ type: "ADD_NOTE", who: "player", noteId });
+    if (me.notesAddedThisTurn + 1 >= NOTES_PER_TURN) setNotePickerOpen(false);
+  };
+
+  // ── Highlights ────────────────────────────────────────────────────────────
+  const myLaneHighlight = (lane: number): { highlight: LaneHighlight; label?: string } => {
+    const sp = me.lanes[lane];
+    if (!isPlayerTurn) return { highlight: null };
+    if (castableLanes.includes(lane)) return { highlight: "open", label: "Cast here" };
+    if (selectedSpell) return { highlight: sp && isTarget({ kind: "spirit", instanceId: sp.instanceId }) ? "target" : null };
+    if (selectedSpirit) {
+      if (sp?.instanceId === selectedSpirit.instanceId) return { highlight: "selected" };
+      if (!sp && canMove(state, "player", selectedSpirit, lane)) return { highlight: "open", label: "Move here" };
+    }
+    if (selectedCard) return { highlight: null };
+    if (sp && (canAttack(state, "player", sp) || canMoveSomewhere(sp))) return { highlight: "selectable" };
+    return { highlight: null };
+  };
+
+  const enemyLaneHighlight = (lane: number): { highlight: LaneHighlight; label?: string } => {
+    const sp = ai.lanes[lane];
+    if (!isPlayerTurn) return { highlight: null };
+    if (selectedSpell) return { highlight: sp && isTarget({ kind: "spirit", instanceId: sp.instanceId }) ? "target" : null };
+    if (selectedSpirit && selectedCanAttack && lane === selectedLane) {
+      return { highlight: "target", label: "Attack player" };
+    }
+    return { highlight: null };
+  };
+
+  const aiHeroTargetable =
+    isPlayerTurn &&
+    (selectedSpell
+      ? isTarget({ kind: "player", side: "ai" })
+      : !!selectedSpirit && selectedCanAttack && ai.lanes[selectedLane] === null);
+  const myHeroTargetable = isPlayerTurn && !!selectedSpell && isTarget({ kind: "player", side: "player" });
+
+  // ── Hint text ─────────────────────────────────────────────────────────────
+  let hint = "Add notes, cast cards, move a spirit, or attack.";
+  if (state.phase === "mulligan") hint = "Keep your opening hand or mulligan once.";
+  else if (state.phase === "game-over") hint = "Game over.";
+  else if (!isPlayerTurn) hint = "The AI is playing…";
+  else if (selectedCard && selectedCard.type !== "chord-spell") hint = `Choose a lane for ${selectedCard.name}.`;
+  else if (selectedSpell) hint = `Choose a target for ${selectedSpell.name}.`;
+  else if (selectedSpirit) {
+    const parts = [];
+    if (selectedCanAttack) parts.push(ai.lanes[selectedLane] ? "attack the spirit across from it" : "attack the player (lane is open)");
+    if (canMoveSomewhere(selectedSpirit)) parts.push("move it to an empty lane");
+    hint = parts.length ? `${selectedSpirit.card.name}: ${parts.join(", or ")}.` : `${selectedSpirit.card.name} can't act right now.`;
+  }
+
+  const renderLane = (side: Side, lane: number) => {
+    const ps = state[side];
+    const sp = ps.lanes[lane];
+    const { highlight, label } = side === "player" ? myLaneHighlight(lane) : enemyLaneHighlight(lane);
+    const onClick = side === "player" ? () => handleMyLaneClick(lane) : () => handleEnemyLaneClick(lane);
+    return sp ? (
+      <FieldSpiritCard
+        key={sp.instanceId}
+        spirit={sp}
+        power={currentPower(ps, sp)}
+        highlight={highlight}
+        onClick={onClick}
+        isOwnersTurn={state.currentPlayer === side}
+      />
+    ) : (
+      <EmptyLane key={`${side}-${lane}`} lane={lane} highlight={highlight} label={label} onClick={onClick} />
+    );
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div
-      className="flex flex-col h-screen w-full overflow-hidden select-none"
-      style={{ background: 'linear-gradient(180deg, #080818 0%, #0d0d2b 50%, #080818 100%)' }}
+      className="flex h-screen overflow-hidden select-none"
+      style={{ background: "linear-gradient(180deg, #080818 0%, #0d0d2b 50%, #080818 100%)" }}
     >
-      {/* Musical staff lines decoration */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-5">
-        {[0.15, 0.25, 0.35, 0.65, 0.75, 0.85].map((pos, i) => (
-          <div key={i} className="absolute w-full h-px bg-white" style={{ top: `${pos * 100}%` }} />
-        ))}
-      </div>
+      <div className="relative flex-1 flex flex-col overflow-y-auto overflow-x-hidden px-4 py-3 gap-2 min-w-0">
+        {/* ── AI side ── */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <HeroZone player={ai} isTarget={aiHeroTargetable} onClick={() => handleHeroClick("ai")} />
+          <NotePool player={ai} />
+          <div className="ml-auto flex items-center gap-4">
+            <PileCounts player={ai} />
+            {!isPlayerTurn && state.phase === "playing" && (
+              <span className="font-cinzel text-gold-400 text-lg animate-pulse">Thinking...</span>
+            )}
+          </div>
+        </div>
 
-      {/* ── AI Side ── */}
-      <div className="flex-none px-4 pt-3">
-        <div className="flex items-start gap-4">
-          {/* AI Hero */}
-          <HeroZone
-            musician={state.ai.musician}
-            hp={state.ai.hp}
-            maxHp={state.ai.maxHp}
-            isTarget={canAttackHero && isPlayerTurn}
-            onClick={handleHeroClick}
-            side="ai"
-          />
+        <div className="grid grid-cols-4 gap-3 justify-items-center">
+          {[...Array(LANE_COUNT).keys()].map((lane) => renderLane("ai", lane))}
+        </div>
 
-          {/* AI Info */}
-          <div className="flex-1 flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className="font-cinzel text-white/40 text-xs">
-                AI • Turn {state.turnNumber}
-              </span>
-              {!isPlayerTurn && (
-                <span className="font-cinzel text-gold-400 text-xs animate-pulse">Thinking...</span>
-              )}
-              <span className="font-cinzel text-white/30 text-xs ml-auto">
-                Hand: {state.ai.hand.length} | Deck: {state.ai.deck.length}
-              </span>
+        {/* ── Divider ── */}
+        <div className="grid grid-cols-4 gap-3 items-center">
+          {[...Array(LANE_COUNT).keys()].map((lane) => (
+            <div key={lane} className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gold-500/40 to-transparent" />
+              <span className="font-cinzel text-gold-500/60 text-[10px] tracking-widest">LANE {lane + 1}</span>
+              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gold-500/40 to-transparent" />
             </div>
-            {/* AI note field */}
-            <NoteFieldRow notes={state.ai.noteField} label="No notes on field" />
-          </div>
+          ))}
         </div>
-      </div>
 
-      {/* AI Chord Field */}
-      <div className="flex-none px-4 py-2 min-h-[120px] flex items-center justify-center">
-        {state.ai.chordField.length === 0 ? (
-          <div className="text-white/10 font-cinzel text-sm italic">— AI battlefield empty —</div>
-        ) : (
-          <div className="flex gap-2 flex-wrap justify-center">
-            {state.ai.chordField.map(spirit => (
-              <FieldSpiritCard
-                key={spirit.instanceId}
-                spirit={spirit}
-                isAttackTarget={!!state.selectedAttackerInstanceId && isPlayerTurn && (!hasTauntOnAI || spirit.hasTaunt)}
-                canSelect={!!state.selectedAttackerInstanceId && isPlayerTurn}
-                onClick={() => handleFieldSpiritClick(spirit.instanceId, 'ai')}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+        <div className="grid grid-cols-4 gap-3 justify-items-center">
+          {[...Array(LANE_COUNT).keys()].map((lane) => renderLane("player", lane))}
+        </div>
 
-      {/* ── Divider ── */}
-      <div className="flex-none mx-4 my-1 flex items-center gap-3">
-        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gold-500/40 to-transparent" />
-        <div className="font-cinzel text-gold-500/60 text-xs tracking-widest">⬩ BATTLEFIELD ⬩</div>
-        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gold-500/40 to-transparent" />
-      </div>
-
-      {/* Player Chord Field */}
-      <div className="flex-none px-4 py-2 min-h-[120px] flex items-center justify-center">
-        {state.player.chordField.length === 0 ? (
-          <div className="text-white/10 font-cinzel text-sm italic">— Your battlefield empty —</div>
-        ) : (
-          <div className="flex gap-2 flex-wrap justify-center">
-            {state.player.chordField.map(spirit => (
-              <FieldSpiritCard
-                key={spirit.instanceId}
-                spirit={spirit}
-                isSelected={state.selectedAttackerInstanceId === spirit.instanceId}
-                canSelect={isPlayerTurn && spirit.canChallenge && !spirit.isExhausted && !state.selectedHandCardId}
-                onClick={() => handleFieldSpiritClick(spirit.instanceId, 'player')}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── Player Side ── */}
-      <div className="flex-none px-4 pb-1">
-        <div className="flex items-start gap-4">
-          <HeroZone
-            musician={state.player.musician}
-            hp={state.player.hp}
-            maxHp={state.player.maxHp}
-            side="player"
+        {/* ── Player side ── */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <HeroZone player={me} isTarget={myHeroTargetable} onClick={() => handleHeroClick("player")} />
+          <SelectNoteCard
+            onClick={() => setNotePickerOpen(true)}
+            enabled={isPlayerTurn && me.notesAddedThisTurn < NOTES_PER_TURN && totalNotes(me.reserve) > 0}
+            remaining={NOTES_PER_TURN - me.notesAddedThisTurn}
           />
-          <div className="flex-1 flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className="font-cinzel text-gold-400/70 text-xs font-bold">Your Turn</span>
-              <span className="font-cinzel text-white/30 text-xs ml-auto">
-                Hand: {state.player.hand.length} | Deck: {state.player.deck.length}
-              </span>
-            </div>
-            <NoteFieldRow notes={state.player.noteField} label="No notes played yet" />
+          <NotePool player={me} />
+          <div className="ml-auto flex items-center gap-4">
+            <PileCounts player={me} />
+            {isPlayerTurn && <span className="font-cinzel text-gold-400/80 text-lg font-bold">Your Turn</span>}
           </div>
         </div>
-      </div>
 
-      {/* ── Note Selection Panel ── */}
-      <div className="flex-none px-4 py-2 border-t border-white/5">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="font-cinzel text-gold-400/80 text-xs font-bold tracking-wide">NOTE SPIRITS</span>
-          {state.player.playedNoteThisTurn ? (
-            <span className="font-cinzel text-white/30 text-xs">(played this turn)</span>
-          ) : isPlayerTurn ? (
-            <span className="font-cinzel text-green-400/70 text-xs">Choose 1 to play →</span>
-          ) : null}
-        </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {NOTE_SPIRITS.map(note => {
-            const onField = state.player.noteField.some(n => n.noteId === note.id);
-            return (
-              <NoteCard
-                key={note.id}
-                note={note}
-                isOnField={onField}
-                isAvailable={isPlayerTurn && !state.player.playedNoteThisTurn && !onField}
-                onClick={() => handleNoteClick(note.id as NoteId)}
-                size="sm"
-              />
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Player Hand ── */}
-      <div className="flex-1 px-4 py-2 border-t border-white/5 overflow-hidden">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="font-cinzel text-white/50 text-xs tracking-wide">YOUR HAND</span>
-          {state.selectedHandCardId && (
-            <span className="font-cinzel text-cyan-400 text-xs animate-pulse">
-              Select target for spell...
-            </span>
-          )}
-          {state.selectedAttackerInstanceId && (
-            <span className="font-cinzel text-orange-400 text-xs animate-pulse">
-              Select target to challenge...
-            </span>
-          )}
-        </div>
-        <div className="flex gap-2 overflow-x-auto pb-2">
-          {state.player.hand.map(card => {
-            const playable = canAffordCard(card, state.player.noteField, state.player.chordField);
-            return (
-              <HandCard
-                key={`${card.id}-${state.player.hand.indexOf(card)}`}
-                card={card}
-                isSelected={state.selectedHandCardId === card.id}
-                isPlayable={isPlayerTurn && playable}
-                onClick={() => handleHandCardClick(card.id)}
-                compact
-              />
-            );
-          })}
-          {state.player.hand.length === 0 && (
+        {/* ── Hand ── */}
+        <div className="flex gap-2 overflow-x-auto pb-2 pt-1 min-h-[232px]">
+          {me.hand.map((card, i) => (
+            <HandCard
+              key={`${card.id}-${i}`}
+              card={card}
+              isSelected={state.selectedHandIndex === i}
+              isPlayable={isPlayerTurn && canPlayCard(state, "player", card)}
+              onClick={() => handleHandClick(i)}
+            />
+          ))}
+          {me.hand.length === 0 && (
             <div className="font-cinzel text-white/20 text-sm italic self-center">Empty hand</div>
           )}
         </div>
+
+        {/* ── Note picker ── */}
+        {notePickerOpen && (
+          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 rounded-lg p-6 w-fit text-center relative border border-white/10">
+              <button className="absolute top-1 right-2 p-2 text-xl text-white/60 hover:text-white" onClick={() => setNotePickerOpen(false)}>
+                ✕
+              </button>
+              <h2 className="text-2xl font-cinzel font-bold mb-1 text-gold-400">Add Notes</h2>
+              <p className="font-cinzel text-white/50 text-sm mb-4">
+                {NOTES_PER_TURN - me.notesAddedThisTurn} left this turn · numbers show what&apos;s left in your reserve
+              </p>
+              <div className="flex flex-wrap gap-4 justify-center max-w-3xl">
+                {me.instrument.allowedNotes.map(noteIdOf).filter((id): id is NoteId => !!id).map((id) => {
+                  const n = NOTE_MAP[id];
+                  const enabled = canAddNote(state, "player", id);
+                  return (
+                    <button
+                      key={id}
+                      disabled={!enabled}
+                      className={clsx(
+                        "relative rounded-full w-20 h-20 flex items-center justify-center font-cinzel font-bold text-black text-3xl",
+                        !enabled && "opacity-30 cursor-not-allowed",
+                      )}
+                      style={{ backgroundColor: n.color, boxShadow: enabled ? `0 0 8px ${n.color}` : "none" }}
+                      onClick={() => handleAddNote(id)}
+                    >
+                      {n.primaryNote}
+                      <span className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-black border border-white/40 text-white text-xs flex items-center justify-center">
+                        {me.reserve[id] ?? 0}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Mulligan ── */}
+        {state.phase === "mulligan" && !me.mulliganDone && (
+          <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4">
+            <div className="rounded-2xl border-2 border-gold-500/60 p-6 text-center max-w-6xl" style={{ background: "linear-gradient(135deg, #0a0a1a, #1a1a3a)" }}>
+              <h2 className="font-cinzel font-bold text-3xl text-gold-400 mb-1">Opening Hand</h2>
+              <p className="font-cinzel text-white/60 mb-1">{state.log[0]}</p>
+              <p className="font-crimson text-white/50 italic mb-4">You may mulligan once for free: shuffle this hand away and draw a new one.</p>
+              <div className="flex gap-2 justify-center flex-wrap mb-6">
+                {me.hand.map((card, i) => (
+                  <HandCard key={`${card.id}-${i}`} card={card} />
+                ))}
+              </div>
+              <div className="flex gap-4 justify-center">
+                <button
+                  onClick={() => dispatch({ type: "KEEP_HAND", who: "player" })}
+                  className="px-8 py-3 rounded-xl font-cinzel font-bold border-2 border-gold-500 text-gold-400 hover:bg-gold-500/10 transition-all"
+                >
+                  Keep Hand
+                </button>
+                <button
+                  onClick={() => dispatch({ type: "MULLIGAN", who: "player" })}
+                  className="px-8 py-3 rounded-xl font-cinzel font-bold border-2 border-white/20 text-white/70 hover:bg-white/5 transition-all"
+                >
+                  Mulligan
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Game Over Overlay ── */}
+        {state.phase === "game-over" && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+            <div
+              className="rounded-2xl border-2 p-10 text-center"
+              style={{
+                borderColor: state.winner === "player" ? "#d4af37" : "#ef4444",
+                background: "linear-gradient(135deg, #0a0a1a, #1a1a3a)",
+                boxShadow:
+                  state.winner === "player"
+                    ? "0 0 40px rgba(212,175,55,0.5)"
+                    : "0 0 40px rgba(239,68,68,0.5)",
+              }}
+            >
+              <div className="font-cinzel text-5xl mb-2">
+                {state.winner === "player" ? "♫" : "♩"}
+              </div>
+              <div
+                className="font-cinzel font-bold text-4xl mb-2"
+                style={{ color: state.winner === "player" ? "#d4af37" : "#ef4444" }}
+              >
+                {state.winner === "player" ? "Victory!" : "Defeated"}
+              </div>
+              <div className="font-cinzel text-white/60 text-lg mb-6">
+                {state.winner === "player"
+                  ? "Your chord progression rang out victorious!"
+                  : "The dissonance overwhelmed you..."}
+              </div>
+              <button
+                onClick={() => (window.location.href = "/")}
+                className="px-8 py-3 rounded-xl font-cinzel font-bold border-2 border-gold-500 text-gold-400 hover:bg-gold-500/10 transition-all"
+              >
+                Return to Menu
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ── Controls & Log ── */}
-      <div className="flex-none px-4 pb-3 flex gap-3 items-end">
-        <div className="flex-1">
+      {/* ── Sidebar: status, spell payment, log, end turn ── */}
+      <div className="flex-none w-80 p-4 flex flex-col gap-3 border-l border-white/5 bg-black/20">
+        <div className="font-cinzel text-white/40 text-sm">Turn {state.turnNumber}</div>
+        <div className="font-cinzel text-cyan-300 text-sm min-h-[40px]">{hint}</div>
+
+        {selectedSpell && payments.length > 0 && (
+          <div className="rounded-lg border border-white/10 p-2 bg-black/40">
+            <div className="font-cinzel text-white/50 text-xs mb-1">Pay with</div>
+            {payments.map((p, i) => {
+              const tapped = p.kind === "spirit" ? me.lanes.find((sp) => sp?.instanceId === p.instanceId) : null;
+              return (
+                <label key={i} className="flex items-center gap-2 py-1 cursor-pointer font-cinzel text-sm text-white/80">
+                  <input
+                    type="radio"
+                    name="payment"
+                    checked={payment === p}
+                    onChange={() => setPaymentIndex(i)}
+                  />
+                  {p.kind === "notes" ? (
+                    <span className="flex items-center gap-2">Notes <NoteCost notes={selectedSpell.requiredNotes} /></span>
+                  ) : (
+                    <span>Tap {tapped?.card.name} (lane {laneOf(me, p.instanceId) + 1})</span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex-1 min-h-0">
           <GameLog logs={state.log} />
         </div>
-        <div className="flex flex-col gap-2">
-          <button
-            onClick={handleEndTurn}
-            disabled={!isPlayerTurn}
-            className={clsx(
-              'px-6 py-3 rounded-xl font-cinzel font-bold text-sm border-2 transition-all duration-200',
-              isPlayerTurn
-                ? 'border-gold-500 text-gold-400 hover:bg-gold-500/10 hover:shadow-[0_0_16px_rgba(212,175,55,0.4)] cursor-pointer'
-                : 'border-white/10 text-white/20 cursor-not-allowed',
-            )}
-            style={{ background: 'rgba(0,0,0,0.5)' }}
-          >
-            End Turn →
-          </button>
-          <div className="font-cinzel text-center text-white/30" style={{ fontSize: '0.6rem' }}>
-            Turn {state.turnNumber}
-          </div>
-        </div>
-      </div>
 
-      {/* ── Game Over Overlay ── */}
-      {state.phase === 'game-over' && (
-        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div
-            className="rounded-2xl border-2 p-10 text-center"
-            style={{
-              borderColor: state.winner === 'player' ? '#d4af37' : '#ef4444',
-              background: 'linear-gradient(135deg, #0a0a1a, #1a1a3a)',
-              boxShadow: state.winner === 'player'
-                ? '0 0 40px rgba(212,175,55,0.5)'
-                : '0 0 40px rgba(239,68,68,0.5)',
-            }}
-          >
-            <div className="font-cinzel text-5xl mb-2">
-              {state.winner === 'player' ? '♫' : '♩'}
-            </div>
-            <div
-              className="font-cinzel font-bold text-4xl mb-2"
-              style={{ color: state.winner === 'player' ? '#d4af37' : '#ef4444' }}
-            >
-              {state.winner === 'player' ? 'Victory!' : 'Defeated'}
-            </div>
-            <div className="font-cinzel text-white/60 text-lg mb-6">
-              {state.winner === 'player'
-                ? 'Your chord progression rang out victorious!'
-                : 'The dissonance overwhelmed you...'}
-            </div>
-            <button
-              onClick={() => window.location.href = '/'}
-              className="px-8 py-3 rounded-xl font-cinzel font-bold border-2 border-gold-500 text-gold-400 hover:bg-gold-500/10 transition-all"
-            >
-              Return to Menu
-            </button>
-          </div>
-        </div>
-      )}
+        <button
+          onClick={() => act({ type: "END_TURN", who: "player" })}
+          disabled={!isPlayerTurn}
+          className={clsx(
+            "px-6 py-3 rounded-xl font-cinzel font-bold text-sm border-2 transition-all duration-200",
+            isPlayerTurn
+              ? "border-gold-500 text-gold-400 hover:bg-gold-500/10 hover:shadow-[0_0_16px_rgba(212,175,55,0.4)] cursor-pointer"
+              : "border-white/10 text-white/20 cursor-not-allowed",
+          )}
+          style={{ background: "rgba(0,0,0,0.5)" }}
+        >
+          End Turn →
+        </button>
+      </div>
     </div>
   );
 }
