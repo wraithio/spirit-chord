@@ -24,7 +24,6 @@ html, body {
   background: var(--spirit-dark);
   color: #e2e8f0;
   font-family: 'Crimson Pro', Georgia, serif;
-  overflow: hidden;
 }
 
 /* Scrollbar styling */

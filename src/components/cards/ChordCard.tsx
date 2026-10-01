@@ -57,9 +57,10 @@ interface HandCardProps {
   isSelected?: boolean;
   isPlayable?: boolean;
   onClick?: () => void;
+  fill?: boolean;            // size from the parent row height instead of a fixed size
 }
 
-export function HandCard({ card, isSelected, isPlayable, onClick }: HandCardProps) {
+export function HandCard({ card, isSelected, isPlayable, onClick, fill }: HandCardProps) {
   const isSpirit = card.type !== 'chord-spell';
   const borderColor = isSelected ? '#d4af37' : isPlayable ? '#4ade80' : '#2a2a5a';
 
@@ -68,7 +69,8 @@ export function HandCard({ card, isSelected, isPlayable, onClick }: HandCardProp
       onClick={onClick}
       disabled={!onClick || (!isPlayable && !isSelected)}
       className={clsx(
-        'relative flex-none rounded-xl border-2 flex flex-col overflow-hidden transition-all duration-200 select-none text-left w-40 h-56',
+        'relative flex-none rounded-xl border-2 flex flex-col overflow-hidden transition-all duration-200 select-none text-left',
+        fill ? 'h-full max-h-60 aspect-[5/7]' : 'w-40 h-56',
         isSelected && 'scale-105 -translate-y-2',
         isPlayable && !isSelected && 'hover:scale-102 hover:-translate-y-1 cursor-pointer',
         !isPlayable && !isSelected && onClick && 'opacity-50 cursor-not-allowed',
@@ -97,7 +99,7 @@ export function HandCard({ card, isSelected, isPlayable, onClick }: HandCardProp
       </div>
 
       {/* Art area */}
-      <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+      <div className="flex-1 min-h-0 flex items-center justify-center relative overflow-hidden">
         <span className="relative z-10 font-cinzel text-white/20 text-5xl">{TYPE_SYMBOL[card.type]}</span>
         <div className="absolute bottom-0.5 right-2 font-cinzel font-bold text-white/40 text-sm">
           {card.type !== 'song-spirit' && card.romanNumeral}
@@ -116,7 +118,7 @@ export function HandCard({ card, isSelected, isPlayable, onClick }: HandCardProp
           </div>
         )}
         {card.abilityText && (
-          <p className="text-white/60 leading-tight text-[11px] line-clamp-3">{card.abilityText}</p>
+          <p className="text-white/60 leading-tight text-[11px] line-clamp-3 [@media(max-height:640px)]:line-clamp-2">{card.abilityText}</p>
         )}
       </div>
 
@@ -162,7 +164,7 @@ export function FieldSpiritCard({ spirit, power, highlight = null, onClick, isOw
       onClick={onClick}
       disabled={!onClick || !highlight}
       className={clsx(
-        'relative rounded-lg border-2 flex flex-col overflow-hidden transition-all duration-200 select-none w-40 h-48 text-left',
+        'relative rounded-lg border-2 flex flex-col overflow-hidden transition-all duration-200 select-none h-full max-h-52 max-w-full aspect-[5/6] text-left',
         highlight === 'selected' && 'scale-105 shadow-[0_0_20px_rgba(212,175,55,0.7)]',
         highlight === 'target' && 'shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse cursor-pointer',
         highlight === 'selectable' && 'hover:scale-105 cursor-pointer',
@@ -177,7 +179,7 @@ export function FieldSpiritCard({ spirit, power, highlight = null, onClick, isOw
       </div>
 
       {/* Art + attachments */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-1 px-1">
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col items-center justify-center gap-1 px-1">
         <span className="font-cinzel text-white/25 text-4xl">{card.type === 'song-spirit' ? '♫' : '♩'}</span>
         <div className="flex flex-wrap gap-1 justify-center">
           {attachments.map((a, i) => (
@@ -226,7 +228,7 @@ export function EmptyLane({ lane, highlight = null, label, onClick }: EmptyLaneP
       onClick={onClick}
       disabled={!onClick || !highlight}
       className={clsx(
-        'rounded-lg border-2 border-dashed w-40 h-48 flex flex-col items-center justify-center transition-all duration-200',
+        'rounded-lg border-2 border-dashed h-full max-h-52 max-w-full aspect-[5/6] flex flex-col items-center justify-center transition-all duration-200',
         highlight ? 'cursor-pointer bg-white/5 hover:bg-white/10' : 'bg-black/20',
         highlight === 'target' && 'animate-pulse',
       )}

@@ -16,7 +16,7 @@ export default function HomePage() {
 
   return (
     <div
-      className="relative min-h-screen flex flex-col items-center justify-center"
+      className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden"
       style={{ background: 'linear-gradient(180deg, #04040f 0%, #080818 40%, #0d0d2b 100%)' }}
     >
       {/* Animated floating notes */}

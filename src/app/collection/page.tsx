@@ -35,7 +35,7 @@ export default function CollectionPage() {
 
   return (
     <div
-      className="min-h-screen flex flex-col"
+      className="h-screen flex flex-col"
       style={{ background: 'linear-gradient(180deg, #04040f, #080818, #0d0d2b)' }}
     >
       {/* Header */}

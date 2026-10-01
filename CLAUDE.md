@@ -89,5 +89,11 @@ The main menu's `/loadout?mode=local` link is the placeholder entry point; nothi
   - `NoteCard.tsx` is a pool note chip, showing untapped and tapped counts.
   - `SelectNoteCard.tsx` is the "Add Notes" button.
 - Card art is placeholder CSS gradients (`artGradient`); only `src/assets/img/heroes/sunslinger.jpg` exists.
-- **Theme:** custom Tailwind colors `gold-{300..600}` and `spirit-{dark,navy,purple,card,border}`, and fonts `font-cinzel`/`font-crimson` (loaded via a Google Fonts `@import` in `globals.css`). Components mix Tailwind classes with heavy inline `style` for gradients and glows. The board is laid out to fit 1920×1080.
+- **Theme:** custom Tailwind colors `gold-{300..600}` and `spirit-{dark,navy,purple,card,border}`, and fonts `font-cinzel`/`font-crimson` (loaded via a Google Fonts `@import` in `globals.css`). Components mix Tailwind classes with heavy inline `style` for gradients and glows.
+- **Sizing:** the game board must fit the viewport without page scrolling, down to about 1280×600 (laptops at 125% scaling have only ~1536×750 of usable space).
+  - `GameBoard` is `h-screen`. Its two header strips are fixed height and must not wrap, so turn status lives in the sidebar.
+  - The two lane rows and the hand row share the rest of the height (`flex-[10]` / `flex-[10]` / `flex-[12]`, with minimum heights).
+  - Cards size from their row's height (`h-full` + `aspect-[5/6]` in lanes, `HandCard fill` with `aspect-[5/7]` in the hand), capped at the full-HD sizes (`max-h-52` / `max-h-60`).
+  - Don't give board cards fixed `w-*`/`h-*` sizes. Check changes at 1280×600 and 1920×950.
+- **Page scrolling:** other pages scroll normally, because `html, body` aren't `overflow: hidden`. Loadout and collection are `h-screen`, with a scrolling middle section.
 - `audioEngine.ts` lazily creates one `AudioContext`. Interaction handlers call `resumeAudioContext()` first to satisfy browser autoplay policy. `GameBoard`'s `act()` does this and plays the action's sound (`playActionSound`), so route new player actions through it.

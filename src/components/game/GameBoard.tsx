@@ -103,7 +103,7 @@ function HeroZone({
 function NotePool({ player }: { player: PlayerState }) {
   const scale = player.instrument.allowedNotes.map(noteIdOf).filter((id): id is NoteId => !!id);
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className="min-w-0 flex items-center gap-2 flex-wrap">
       {scale.map((id) => (
         <NoteCard key={id} note={NOTE_MAP[id]} untapped={player.pool[id] ?? 0} tapped={player.tappedPool[id] ?? 0} />
       ))}
@@ -375,25 +375,22 @@ export default function GameBoard({
       className="flex h-screen overflow-hidden select-none"
       style={{ background: "linear-gradient(180deg, #080818 0%, #0d0d2b 50%, #080818 100%)" }}
     >
-      <div className="relative flex-1 flex flex-col overflow-y-auto overflow-x-hidden px-4 py-3 gap-2 min-w-0">
+      <div className="relative flex-1 flex flex-col overflow-y-auto overflow-x-hidden px-4 py-2 gap-1.5 min-w-0 min-h-0">
         {/* ── AI side ── */}
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex-none flex items-center gap-4">
           <HeroZone player={ai} isTarget={aiHeroTargetable} onClick={() => handleHeroClick("ai")} />
           <NotePool player={ai} />
-          <div className="ml-auto flex items-center gap-4">
+          <div className="ml-auto flex-none">
             <PileCounts player={ai} />
-            {!isPlayerTurn && state.phase === "playing" && (
-              <span className="font-cinzel text-gold-400 text-lg animate-pulse">Thinking...</span>
-            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-3 justify-items-center">
+        <div className="grid grid-cols-4 gap-3 justify-items-center items-center flex-[10] min-h-[110px]">
           {[...Array(LANE_COUNT).keys()].map((lane) => renderLane("ai", lane))}
         </div>
 
         {/* ── Divider ── */}
-        <div className="grid grid-cols-4 gap-3 items-center">
+        <div className="flex-none grid grid-cols-4 gap-3 items-center">
           {[...Array(LANE_COUNT).keys()].map((lane) => (
             <div key={lane} className="flex items-center gap-2">
               <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gold-500/40 to-transparent" />
@@ -403,12 +400,12 @@ export default function GameBoard({
           ))}
         </div>
 
-        <div className="grid grid-cols-4 gap-3 justify-items-center">
+        <div className="grid grid-cols-4 gap-3 justify-items-center items-center flex-[10] min-h-[110px]">
           {[...Array(LANE_COUNT).keys()].map((lane) => renderLane("player", lane))}
         </div>
 
         {/* ── Player side ── */}
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex-none flex items-center gap-4">
           <HeroZone player={me} isTarget={myHeroTargetable} onClick={() => handleHeroClick("player")} />
           <SelectNoteCard
             onClick={() => setNotePickerOpen(true)}
@@ -416,14 +413,13 @@ export default function GameBoard({
             remaining={NOTES_PER_TURN - me.notesAddedThisTurn}
           />
           <NotePool player={me} />
-          <div className="ml-auto flex items-center gap-4">
+          <div className="ml-auto flex-none">
             <PileCounts player={me} />
-            {isPlayerTurn && <span className="font-cinzel text-gold-400/80 text-lg font-bold">Your Turn</span>}
           </div>
         </div>
 
         {/* ── Hand ── */}
-        <div className="flex gap-2 overflow-x-auto pb-2 pt-1 min-h-[232px]">
+        <div className="flex gap-2 overflow-x-auto overflow-y-hidden pb-1 pt-1 flex-[12] min-h-[150px]">
           {me.hand.map((card, i) => (
             <HandCard
               key={`${card.id}-${i}`}
@@ -431,6 +427,7 @@ export default function GameBoard({
               isSelected={state.selectedHandIndex === i}
               isPlayable={isPlayerTurn && canPlayCard(state, "player", card)}
               onClick={() => handleHandClick(i)}
+              fill
             />
           ))}
           {me.hand.length === 0 && (
@@ -547,7 +544,15 @@ export default function GameBoard({
 
       {/* ── Sidebar: status, spell payment, log, end turn ── */}
       <div className="flex-none w-80 p-4 flex flex-col gap-3 border-l border-white/5 bg-black/20">
-        <div className="font-cinzel text-white/40 text-sm">Turn {state.turnNumber}</div>
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="font-cinzel text-white/40 text-sm">Turn {state.turnNumber}</span>
+          {state.phase === "playing" &&
+            (isPlayerTurn ? (
+              <span className="font-cinzel text-gold-400 font-bold">Your Turn</span>
+            ) : (
+              <span className="font-cinzel text-gold-400 animate-pulse">AI thinking…</span>
+            ))}
+        </div>
         <div className="font-cinzel text-cyan-300 text-sm min-h-[40px]">{hint}</div>
 
         {selectedSpell && payments.length > 0 && (
